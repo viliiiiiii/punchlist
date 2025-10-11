@@ -11,27 +11,18 @@ import { useTasks } from './context/TaskContext.jsx';
 import { exportAllTasks, exportBuildingTasks } from './utils/pdf.js';
 
 const tabs = [
-  { id: 'tasks', label: 'Tasks', icon: ListChecks },
-  { id: 'rooms', label: 'Rooms', icon: Building2 },
-  { id: 'board', label: 'Board', icon: Kanban },
+  { id: 'rooms', label: 'Rooms', icon: ListChecks },
+  { id: 'board', label: 'Board', icon: TableProperties },
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ];
 
 export default function App() {
   const { tasks } = useTasks();
-  const [activeTab, setActiveTab] = useState('tasks');
+  const [activeTab, setActiveTab] = useState('rooms');
   const [modalTask, setModalTask] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [buildingFilter, setBuildingFilter] = useState('all');
-  const [previewPhoto, setPreviewPhoto] = useState(null);
-
-  const handlePreviewPhoto = (photo) => {
-    if (!photo) return;
-    const src = photo.url || photo.thumb;
-    if (!src) return;
-    setPreviewPhoto({ src, name: photo.key || '' });
-  };
 
   const stats = useMemo(() => ({
     total: tasks.length,
@@ -61,9 +52,9 @@ export default function App() {
 
   const ActiveView = () => {
     switch (activeTab) {
-      case 'tasks':
+      case 'rooms':
         return (
-          <TasksView
+          <RoomsView
             onCreate={handleCreate}
             onEdit={handleEdit}
             buildingFilter={buildingFilter}
