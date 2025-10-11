@@ -9,7 +9,7 @@ const columns = [
   { id: 'done', label: 'Done' },
 ];
 
-export default function BoardView({ onEdit }) {
+export default function BoardView({ onEdit, onPhotoPreview }) {
   const { tasks } = useTasks();
 
   const grouped = useMemo(() => {
@@ -33,7 +33,7 @@ export default function BoardView({ onEdit }) {
             ) : (
               column.tasks.map((task) => (
                 <motion.div key={task.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
-                  <TaskCard task={task} onEdit={onEdit} />
+                  <TaskCard task={task} onEdit={onEdit} onPhotoPreview={onPhotoPreview} />
                 </motion.div>
               ))
             )}

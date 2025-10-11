@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertCircle, Download, LayoutDashboard, ListChecks, Settings as SettingsIcon, TableProperties } from 'lucide-react';
+import { AlertCircle, Download, LayoutDashboard, ListChecks, Settings as SettingsIcon, Building2, Kanban } from 'lucide-react';
+import TasksView from './components/TasksView.jsx';
 import RoomsView from './components/RoomsView.jsx';
 import BoardView from './components/BoardView.jsx';
 import DashboardView from './components/DashboardView.jsx';
@@ -60,8 +61,10 @@ export default function App() {
             setBuildingFilter={setBuildingFilter}
           />
         );
+      case 'rooms':
+        return <RoomsView onEdit={handleEdit} onPhotoPreview={handlePreviewPhoto} />;
       case 'board':
-        return <BoardView onCreate={handleCreate} onEdit={handleEdit} />;
+        return <BoardView onEdit={handleEdit} onPhotoPreview={handlePreviewPhoto} />;
       case 'dashboard':
         return <DashboardView stats={stats} />;
       case 'settings':
@@ -76,7 +79,7 @@ export default function App() {
       <header className="app-header">
         <div className="logo">Punch List</div>
         <div className="header-actions">
-          {activeTab === 'rooms' && (
+          {activeTab === 'tasks' && (
             <>
               <button className="primary" onClick={handleCreate}>New Task</button>
               <button className="ghost" onClick={handleExportAll} title="Export All Tasks">
@@ -140,6 +143,15 @@ export default function App() {
         }}
         task={modalTask}
       />
+      {previewPhoto && (
+        <div className="photo-preview-backdrop" onClick={() => setPreviewPhoto(null)}>
+          <div className="photo-preview-content" onClick={(event) => event.stopPropagation()}>
+            <img src={previewPhoto.src} alt="Task attachment" />
+            {previewPhoto.name && <span className="preview-caption">{previewPhoto.name}</span>}
+            <button className="ghost" onClick={() => setPreviewPhoto(null)}>Close</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

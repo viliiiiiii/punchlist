@@ -5,7 +5,7 @@ import { createId } from '../utils/id.js';
 
 const statusOrder = ['open', 'in_progress', 'done'];
 
-export default function TaskCard({ task, onEdit, compact = false }) {
+export default function TaskCard({ task, onEdit, onPhotoPreview, compact = false }) {
   const { deleteTask, updateTask, duplicateTask } = useTasks();
 
   const move = (direction) => {
@@ -46,9 +46,20 @@ export default function TaskCard({ task, onEdit, compact = false }) {
       </div>
       {task.photos?.length > 0 && (
         <div className="photo-strip">
-          {task.photos.map((photo, idx) => (
-            <img key={idx} src={photo.thumb || photo.url} alt="task" />
-          ))}
+          {task.photos.map((photo, idx) => {
+            const source = photo.thumb || photo.url;
+            if (!source) return null;
+            return (
+              <button
+                key={idx}
+                type="button"
+                className="photo-thumb"
+                onClick={() => onPhotoPreview && onPhotoPreview(photo)}
+              >
+                <img src={source} alt="Task attachment" />
+              </button>
+            );
+          })}
         </div>
       )}
       <div className="task-actions">
