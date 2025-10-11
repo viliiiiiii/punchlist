@@ -13,6 +13,8 @@ import {
 const JSPDF_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
 const AUTOTABLE_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js';
 
+let pdfConstructorPromise = null;
+
 function loadScript(src, id) {
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined') {
@@ -34,15 +36,27 @@ function loadScript(src, id) {
 }
 
 async function ensurePdfLibs() {
+  if (!pdfConstructorPromise) {
+    pdfConstructorPromise = (async () => {
+      await loadScript(JSPDF_CDN, 'jspdf-cdn');
+      await loadScript(AUTOTABLE_CDN, 'jspdf-autotable-cdn');
+      const ctor = window.jspdf?.jsPDF;
+      if (!ctor) {
+        throw new Error('jsPDF not available on window');
+      }
+      const probe = new ctor();
+      if (typeof probe.autoTable !== 'function') {
+        throw new Error('jsPDF autoTable plugin unavailable');
+      }
+      return ctor;
+    })();
+  }
+
   try {
-    await loadScript(JSPDF_CDN, 'jspdf-cdn');
-    await loadScript(AUTOTABLE_CDN, 'jspdf-autotable-cdn');
-    if (window.jspdf?.jsPDF) {
-      return window.jspdf.jsPDF;
-    }
-    throw new Error('jsPDF not available on window');
+    return await pdfConstructorPromise;
   } catch (error) {
     console.warn('Falling back to HTML export', error);
+    pdfConstructorPromise = null;
     throw error;
   }
 }
@@ -129,6 +143,9 @@ export async function exportRoomTasks(building, room, tasks) {
   try {
     const jsPDF = await ensurePdfLibs();
     const doc = new jsPDF();
+    if (typeof doc.autoTable !== 'function') {
+      throw new Error('autoTable plugin unavailable');
+    }
     doc.setFontSize(16);
     doc.text(`Punch List: ${title}`, 14, 18);
     doc.autoTable({
@@ -153,6 +170,9 @@ export async function exportBuildingTasks(building, tasks) {
   try {
     const jsPDF = await ensurePdfLibs();
     const doc = new jsPDF();
+    if (typeof doc.autoTable !== 'function') {
+      throw new Error('autoTable plugin unavailable');
+    }
     doc.setFontSize(16);
     doc.text(`Punch List: ${title}`, 14, 18);
     const grouped = filtered.reduce((acc, task) => {
@@ -189,6 +209,9 @@ export async function exportAllTasks(tasks) {
   try {
     const jsPDF = await ensurePdfLibs();
     const doc = new jsPDF({ orientation: 'landscape' });
+    if (typeof doc.autoTable !== 'function') {
+      throw new Error('autoTable plugin unavailable');
+    }
     doc.setFontSize(16);
     doc.text('Punch List: All Buildings', 14, 18);
     const grouped = tasks.reduce((acc, task) => {

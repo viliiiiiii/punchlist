@@ -38,7 +38,11 @@ export default function App() {
     const totals = { total: tasks.length, open: 0, in_progress: 0, done: 0 };
     tasks.forEach((task) => {
       const status = sanitizeStatus(task.status);
-      totals[status] += 1;
+      if (status in totals) {
+        totals[status] += 1;
+      } else {
+        totals.open += 1;
+      }
     });
     return totals;
   }, [tasks]);

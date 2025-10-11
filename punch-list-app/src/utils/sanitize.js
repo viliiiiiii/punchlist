@@ -61,7 +61,11 @@ export function sanitizeStatus(value) {
 }
 
 export function formatStatusLabel(value) {
-  return sanitizeStatus(value).replace('_', ' ');
+  const normalized = sanitizeStatus(value);
+  return normalized
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 export function formatTitle(value) {
