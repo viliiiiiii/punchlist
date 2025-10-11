@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import TaskCard from './TaskCard.jsx';
 import { useTasks } from '../context/TaskContext.jsx';
+import { sanitizeStatus } from '../utils/sanitize.js';
 
 const columns = [
   { id: 'open', label: 'Open' },
@@ -15,7 +16,9 @@ export default function BoardView({ onEdit, onPhotoPreview }) {
   const grouped = useMemo(() => {
     return columns.map((column) => ({
       ...column,
-      tasks: tasks.filter((task) => task.status === column.id).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)),
+      tasks: tasks
+        .filter((task) => sanitizeStatus(task.status) === column.id)
+        .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0)),
     }));
   }, [tasks]);
 

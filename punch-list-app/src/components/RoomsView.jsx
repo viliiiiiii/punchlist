@@ -1,25 +1,38 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Download } from 'lucide-react';
 import TaskCard from './TaskCard.jsx';
 import { useTasks } from '../context/TaskContext.jsx';
 import { exportRoomTasks } from '../utils/pdf.js';
+import { sanitizeBuilding, sanitizeRoom } from '../utils/sanitize.js';
 
 export default function RoomsView({ onEdit, onPhotoPreview }) {
   const { tasks } = useTasks();
   const [buildingFilter, setBuildingFilter] = useState('All');
   const [activeRoomKey, setActiveRoomKey] = useState(null);
 
+  const buildings = useMemo(() => {
+    const values = Array.from(new Set(tasks.map((task) => sanitizeBuilding(task.building))))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    return ['All', ...values];
+  }, [tasks]);
+
+  const filteredTasks = useMemo(() => {
+    if (buildingFilter === 'All') return tasks;
+    return tasks.filter((task) => sanitizeBuilding(task.building) === buildingFilter);
+  }, [tasks, buildingFilter]);
+
   const rooms = useMemo(() => {
-    const filtered = buildingFilter === 'All' ? tasks : tasks.filter((task) => task.building === buildingFilter);
     const grouped = new Map();
 
-    filtered.forEach((task) => {
-      const key = `${task.building}-${task.room}`;
+    filteredTasks.forEach((task) => {
+      const building = sanitizeBuilding(task.building);
+      const room = sanitizeRoom(task.room);
+      const key = `${building}::${room}`;
       if (!grouped.has(key)) {
         grouped.set(key, {
           key,
-          building: task.building,
-          room: task.room,
+          building,
+          room,
           tasks: [],
         });
       }
@@ -27,17 +40,17 @@ export default function RoomsView({ onEdit, onPhotoPreview }) {
     });
 
     return Array.from(grouped.values()).sort((a, b) => {
-      if (a.building === b.building) {
-        return a.room.localeCompare(b.room, undefined, { numeric: true });
-      }
-      return a.building.localeCompare(b.building);
+      const buildingCompare = a.building.localeCompare(b.building, undefined, { numeric: true, sensitivity: 'base' });
+      if (buildingCompare !== 0) return buildingCompare;
+      return a.room.localeCompare(b.room, undefined, { numeric: true, sensitivity: 'base' });
     });
-  }, [tasks, buildingFilter]);
+  }, [filteredTasks]);
 
-  const buildings = useMemo(() => {
-    const values = Array.from(new Set(tasks.map((task) => task.building))).sort();
-    return ['All', ...values];
-  }, [tasks]);
+  useEffect(() => {
+    if (activeRoomKey && !rooms.some((room) => room.key === activeRoomKey)) {
+      setActiveRoomKey(null);
+    }
+  }, [rooms, activeRoomKey]);
 
   const activeRoom = rooms.find((room) => room.key === activeRoomKey);
 
@@ -52,7 +65,11 @@ export default function RoomsView({ onEdit, onPhotoPreview }) {
           }}>
             {buildings.map((value) => (
               <option key={value} value={value}>
-                {value === 'All' ? 'All Buildings' : `Building ${value}`}
+                {value === 'All'
+                  ? 'All Buildings'
+                  : value === 'Unassigned'
+                  ? 'Unassigned Building'
+                  : `Building ${value}`}
               </option>
             ))}
           </select>
@@ -64,12 +81,12 @@ export default function RoomsView({ onEdit, onPhotoPreview }) {
       ) : (
         <div className="rooms-layout">
           <div className="room-chip-list">
-            {rooms.map((room) => (
-              <button
-                key={room.key}
-                className={room.key === activeRoomKey ? 'room-chip active' : 'room-chip'}
-                onClick={() => setActiveRoomKey(room.key === activeRoomKey ? null : room.key)}
-              >
+                {rooms.map((room) => (
+                  <button
+                    key={room.key}
+                    className={room.key === activeRoomKey ? 'room-chip active' : 'room-chip'}
+                    onClick={() => setActiveRoomKey(room.key === activeRoomKey ? null : room.key)}
+                  >
                 <span className="chip-building">{room.building}</span>
                 <span className="chip-room">{room.room}</span>
                 <span className="chip-count">{room.tasks.length}</span>
@@ -82,8 +99,10 @@ export default function RoomsView({ onEdit, onPhotoPreview }) {
               <div className="room-task-wrapper">
                 <div className="room-task-header">
                   <div>
-                    <h3>Building {activeRoom.building}</h3>
-                    <p>Room {activeRoom.room} • {activeRoom.tasks.length} tasks</p>
+                    <h3>{activeRoom.building === 'Unassigned' ? 'Unassigned Building' : `Building ${activeRoom.building}`}</h3>
+                    <p>
+                      Room {activeRoom.room} • {activeRoom.tasks.length} {activeRoom.tasks.length === 1 ? 'task' : 'tasks'}
+                    </p>
                   </div>
                   <button
                     className="ghost"
@@ -93,8 +112,8 @@ export default function RoomsView({ onEdit, onPhotoPreview }) {
                   </button>
                 </div>
                 <div className="room-task-list">
-                  {activeRoom.tasks
-                    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+                  {[...activeRoom.tasks]
+                    .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))
                     .map((task) => (
                       <TaskCard key={task.id} task={task} onEdit={onEdit} onPhotoPreview={onPhotoPreview} compact />
                     ))}

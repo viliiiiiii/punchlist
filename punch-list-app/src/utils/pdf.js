@@ -1,5 +1,19 @@
+import {
+  formatAssignee,
+  formatDueDateShort,
+  formatStatusLabel,
+  formatTitle,
+  sanitizeBuilding,
+  sanitizeRoom,
+  sanitizeSection,
+  sanitizeSeverity,
+  toSlug,
+} from './sanitize.js';
+
 const JSPDF_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
 const AUTOTABLE_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js';
+
+let pdfConstructorPromise = null;
 
 function loadScript(src, id) {
   return new Promise((resolve, reject) => {
@@ -22,15 +36,27 @@ function loadScript(src, id) {
 }
 
 async function ensurePdfLibs() {
+  if (!pdfConstructorPromise) {
+    pdfConstructorPromise = (async () => {
+      await loadScript(JSPDF_CDN, 'jspdf-cdn');
+      await loadScript(AUTOTABLE_CDN, 'jspdf-autotable-cdn');
+      const ctor = window.jspdf?.jsPDF;
+      if (!ctor) {
+        throw new Error('jsPDF not available on window');
+      }
+      const probe = new ctor();
+      if (typeof probe.autoTable !== 'function') {
+        throw new Error('jsPDF autoTable plugin unavailable');
+      }
+      return ctor;
+    })();
+  }
+
   try {
-    await loadScript(JSPDF_CDN, 'jspdf-cdn');
-    await loadScript(AUTOTABLE_CDN, 'jspdf-autotable-cdn');
-    if (window.jspdf?.jsPDF) {
-      return window.jspdf.jsPDF;
-    }
-    throw new Error('jsPDF not available on window');
+    return await pdfConstructorPromise;
   } catch (error) {
     console.warn('Falling back to HTML export', error);
+    pdfConstructorPromise = null;
     throw error;
   }
 }
@@ -40,14 +66,14 @@ function fallbackHtml(title, tasks) {
     .map(
       (task) => `
       <tr>
-        <td>${task.building}</td>
-        <td>${task.room}</td>
-        <td>${task.title}</td>
-        <td>${task.section}</td>
-        <td>${task.severity}</td>
-        <td>${task.status}</td>
-        <td>${task.assignee || ''}</td>
-        <td>${task.dueDate || ''}</td>
+        <td>${sanitizeBuilding(task.building)}</td>
+        <td>${sanitizeRoom(task.room)}</td>
+        <td>${formatTitle(task.title)}</td>
+        <td>${sanitizeSection(task.section)}</td>
+        <td>${sanitizeSeverity(task.severity)}</td>
+        <td>${formatStatusLabel(task.status)}</td>
+        <td>${formatAssignee(task.assignee)}</td>
+        <td>${formatDueDateShort(task.dueDate)}</td>
       </tr>`
     )
     .join('');
@@ -99,20 +125,27 @@ function fallbackHtml(title, tasks) {
 
 function tableBody(tasks) {
   return tasks.map((task) => [
-    task.title,
-    `${task.section}`,
-    task.severity,
-    task.status.replace('_', ' '),
-    task.assignee || '',
-    task.dueDate || '',
+    formatTitle(task.title),
+    `${sanitizeSection(task.section)}`,
+    sanitizeSeverity(task.severity),
+    formatStatusLabel(task.status),
+    formatAssignee(task.assignee),
+    formatDueDateShort(task.dueDate),
   ]);
 }
 
 export async function exportRoomTasks(building, room, tasks) {
-  const title = `Building ${building} - Room ${room}`;
+  const buildingValue = sanitizeBuilding(building);
+  const roomValue = sanitizeRoom(room);
+  const buildingTitle = buildingValue === 'Unassigned' ? 'Unassigned Building' : `Building ${buildingValue}`;
+  const roomTitle = `Room ${roomValue}`;
+  const title = `${buildingTitle} - ${roomTitle}`;
   try {
     const jsPDF = await ensurePdfLibs();
     const doc = new jsPDF();
+    if (typeof doc.autoTable !== 'function') {
+      throw new Error('autoTable plugin unavailable');
+    }
     doc.setFontSize(16);
     doc.text(`Punch List: ${title}`, 14, 18);
     doc.autoTable({
@@ -121,23 +154,29 @@ export async function exportRoomTasks(building, room, tasks) {
       body: tableBody(tasks),
       styles: { fontSize: 10 },
     });
-    doc.save(`punch-list-${building}-${room}.pdf`);
+    const buildingSlug = toSlug(buildingValue, 'unassigned');
+    const roomSlug = toSlug(roomValue, 'room');
+    doc.save(`punch-list-${buildingSlug}-${roomSlug}.pdf`);
   } catch (error) {
     fallbackHtml(title, tasks);
   }
 }
 
 export async function exportBuildingTasks(building, tasks) {
-  const filtered = tasks.filter((task) => task.building === building);
-  const title = `Building ${building}`;
+  const buildingValue = sanitizeBuilding(building);
+  const title = buildingValue === 'Unassigned' ? 'Unassigned Building' : `Building ${buildingValue}`;
+  const filtered = tasks.filter((task) => sanitizeBuilding(task.building) === buildingValue);
   if (filtered.length === 0) return;
   try {
     const jsPDF = await ensurePdfLibs();
     const doc = new jsPDF();
+    if (typeof doc.autoTable !== 'function') {
+      throw new Error('autoTable plugin unavailable');
+    }
     doc.setFontSize(16);
     doc.text(`Punch List: ${title}`, 14, 18);
     const grouped = filtered.reduce((acc, task) => {
-      const key = `Room ${task.room}`;
+      const key = `Room ${sanitizeRoom(task.room)}`;
       if (!acc[key]) acc[key] = [];
       acc[key].push(task);
       return acc;
@@ -145,7 +184,8 @@ export async function exportBuildingTasks(building, tasks) {
     let y = 24;
     Object.entries(grouped).forEach(([roomLabel, roomTasks], index) => {
       if (index > 0) {
-        y = doc.lastAutoTable.finalY + 8;
+        const last = doc.lastAutoTable;
+        y = last ? last.finalY + 8 : y + 8;
       }
       doc.setFontSize(13);
       doc.text(roomLabel, 14, y);
@@ -156,7 +196,8 @@ export async function exportBuildingTasks(building, tasks) {
         styles: { fontSize: 10 },
       });
     });
-    doc.save(`punch-list-building-${building}.pdf`);
+    const buildingSlug = toSlug(buildingValue, 'unassigned');
+    doc.save(`punch-list-building-${buildingSlug}.pdf`);
   } catch (error) {
     fallbackHtml(title, filtered);
   }
@@ -168,30 +209,37 @@ export async function exportAllTasks(tasks) {
   try {
     const jsPDF = await ensurePdfLibs();
     const doc = new jsPDF({ orientation: 'landscape' });
+    if (typeof doc.autoTable !== 'function') {
+      throw new Error('autoTable plugin unavailable');
+    }
     doc.setFontSize(16);
     doc.text('Punch List: All Buildings', 14, 18);
     const grouped = tasks.reduce((acc, task) => {
-      const key = `${task.building}-${task.room}`;
-      if (!acc[key]) acc[key] = { building: task.building, room: task.room, tasks: [] };
+      const building = sanitizeBuilding(task.building);
+      const room = sanitizeRoom(task.room);
+      const key = `${building}::${room}`;
+      if (!acc[key]) acc[key] = { building, room, tasks: [] };
       acc[key].tasks.push(task);
       return acc;
     }, {});
     let y = 24;
     Object.values(grouped)
       .sort((a, b) => {
-        if (a.building === b.building) return a.room.localeCompare(b.room, undefined, { numeric: true });
-        return a.building.localeCompare(b.building);
+        if (a.building === b.building) return a.room.localeCompare(b.room, undefined, { numeric: true, sensitivity: 'base' });
+        return a.building.localeCompare(b.building, undefined, { numeric: true, sensitivity: 'base' });
       })
       .forEach((group, index) => {
         if (index > 0) {
-          y = doc.lastAutoTable.finalY + 8;
+          const last = doc.lastAutoTable;
+          y = last ? last.finalY + 8 : y + 8;
           if (y > doc.internal.pageSize.height - 40) {
             doc.addPage();
             y = 24;
           }
         }
+        const buildingLabel = group.building === 'Unassigned' ? 'Unassigned Building' : `Building ${group.building}`;
         doc.setFontSize(13);
-        doc.text(`Building ${group.building} • Room ${group.room}`, 14, y);
+        doc.text(`${buildingLabel} • Room ${group.room}`, 14, y);
         doc.autoTable({
           startY: y + 4,
           head: [['Title', 'Section', 'Severity', 'Status', 'Assignee', 'Due']],

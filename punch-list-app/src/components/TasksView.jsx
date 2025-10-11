@@ -2,6 +2,18 @@ import React, { useMemo, useState } from 'react';
 import { Plus, Download } from 'lucide-react';
 import { useTasks } from '../context/TaskContext.jsx';
 import { exportRoomTasks } from '../utils/pdf.js';
+import {
+  formatDescription,
+  formatDueDateShort,
+  formatStatusLabel,
+  formatTitle,
+  sanitizeBuilding,
+  sanitizeRoom,
+  sanitizeSection,
+  sanitizeSeverity,
+  sanitizeStatus,
+  sanitizeText,
+} from '../utils/sanitize.js';
 
 const sections = ['All', 'Bedroom', 'Bathroom', 'Balcony', 'Living', 'Entry', 'Other'];
 
@@ -12,20 +24,31 @@ export default function TasksView({ onCreate, onEdit, buildingFilter, setBuildin
   const [search, setSearch] = useState('');
 
   const buildings = useMemo(() => {
-    const values = Array.from(new Set(tasks.map((task) => task.building))).sort();
+    const values = Array.from(new Set(tasks.map((task) => sanitizeBuilding(task.building))))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
     return ['all', ...values];
   }, [tasks]);
 
   const filteredTasks = useMemo(() => {
+    const statusLookup = {
+      All: null,
+      Open: 'open',
+      'In Progress': 'in_progress',
+      Done: 'done',
+    };
+    const statusFilterValue = statusLookup[statusFilter];
     return tasks
       .filter((task) => {
-        const matchesBuilding = buildingFilter === 'all' || task.building === buildingFilter;
-        const matchesSection = sectionFilter === 'All' || task.section === sectionFilter;
-        const matchesStatus = statusFilter === 'All' || task.status === statusFilter.toLowerCase();
+        const buildingValue = sanitizeBuilding(task.building);
+        const sectionValue = sanitizeSection(task.section);
+        const statusValue = sanitizeStatus(task.status);
+        const matchesBuilding = buildingFilter === 'all' || buildingValue === buildingFilter;
+        const matchesSection = sectionFilter === 'All' || sectionValue === sectionFilter;
+        const matchesStatus = !statusFilterValue || statusValue === statusFilterValue;
         const query = search.trim().toLowerCase();
-        const title = (task.title || '').toLowerCase();
-        const room = (task.room || '').toLowerCase();
-        const description = (task.description || '').toLowerCase();
+        const title = sanitizeText(task.title).toLowerCase();
+        const room = sanitizeText(task.room).toLowerCase();
+        const description = sanitizeText(task.description).toLowerCase();
         const matchesQuery =
           query.length === 0 ||
           title.includes(query) ||
@@ -33,8 +56,14 @@ export default function TasksView({ onCreate, onEdit, buildingFilter, setBuildin
           description.includes(query);
         return matchesBuilding && matchesSection && matchesStatus && matchesQuery;
       })
-      .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
   }, [tasks, buildingFilter, sectionFilter, statusFilter, search]);
+
+  const renderBuildingLabel = (value) => {
+    if (value === 'all') return 'All Buildings';
+    if (value === 'Unassigned') return 'Unassigned Building';
+    return `Building ${value}`;
+  };
 
   return (
     <div className="panel">
@@ -44,7 +73,7 @@ export default function TasksView({ onCreate, onEdit, buildingFilter, setBuildin
           <select value={buildingFilter} onChange={(e) => setBuildingFilter(e.target.value)}>
             {buildings.map((value) => (
               <option key={value} value={value}>
-                {value === 'all' ? 'All Buildings' : `Building ${value}`}
+                {renderBuildingLabel(value)}
               </option>
             ))}
           </select>
@@ -110,16 +139,16 @@ export default function TasksView({ onCreate, onEdit, buildingFilter, setBuildin
                 <tr key={task.id}>
                   <td>
                     <div className="table-primary">
-                      <div className="table-title">{task.title}</div>
-                      <div className="table-subtitle">{task.description || 'No description provided.'}</div>
+                      <div className="table-title">{formatTitle(task.title)}</div>
+                      <div className="table-subtitle">{formatDescription(task.description)}</div>
                     </div>
                   </td>
-                  <td>{task.building}</td>
-                  <td>{task.room}</td>
-                  <td>{task.section}</td>
-                  <td className={`status-text ${task.status}`}>{task.status.replace('_', ' ')}</td>
-                  <td className={`severity-text ${task.severity}`}>{task.severity}</td>
-                  <td>{task.dueDate || '—'}</td>
+                  <td>{sanitizeBuilding(task.building)}</td>
+                  <td>{sanitizeRoom(task.room)}</td>
+                  <td>{sanitizeSection(task.section)}</td>
+                  <td className={`status-text ${sanitizeStatus(task.status)}`}>{formatStatusLabel(task.status)}</td>
+                  <td className={`severity-text ${sanitizeSeverity(task.severity)}`}>{sanitizeSeverity(task.severity)}</td>
+                  <td>{formatDueDateShort(task.dueDate)}</td>
                   <td>
                     <div className="table-actions">
                       <button className="ghost" onClick={() => onEdit(task)}>
@@ -129,9 +158,13 @@ export default function TasksView({ onCreate, onEdit, buildingFilter, setBuildin
                         className="ghost"
                         onClick={() =>
                           exportRoomTasks(
-                            task.building,
-                            task.room,
-                            tasks.filter((t) => t.room === task.room && t.building === task.building)
+                            sanitizeBuilding(task.building),
+                            sanitizeRoom(task.room),
+                            tasks.filter(
+                              (t) =>
+                                sanitizeRoom(t.room) === sanitizeRoom(task.room) &&
+                                sanitizeBuilding(t.building) === sanitizeBuilding(task.building)
+                            )
                           )
                         }
                       >

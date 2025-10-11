@@ -1,6 +1,14 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useTasks } from '../context/TaskContext.jsx';
+import {
+  formatStatusLabel,
+  formatTitle,
+  sanitizeBuilding,
+  sanitizeRoom,
+  sanitizeSection,
+  sanitizeStatus,
+} from '../utils/sanitize.js';
 
 function buildCounts(items, keyFn) {
   const counts = new Map();
@@ -17,10 +25,30 @@ function buildCounts(items, keyFn) {
 export default function DashboardView({ stats }) {
   const { tasks } = useTasks();
 
-  const topSections = useMemo(() => buildCounts(tasks, (task) => task.section || 'Unassigned'), [tasks]);
-  const topRooms = useMemo(() => buildCounts(tasks, (task) => `${task.building}-${task.room}`), [tasks]);
+  const topSections = useMemo(
+    () => buildCounts(tasks, (task) => sanitizeSection(task.section)),
+    [tasks]
+  );
+  const topRooms = useMemo(
+    () =>
+      buildCounts(tasks, (task) => {
+        const building = sanitizeBuilding(task.building);
+        const room = sanitizeRoom(task.room);
+        return `${building}::${room}`;
+      }).map((item) => {
+        const [building, room] = item.name.split('::');
+        return {
+          name: `${building === 'Unassigned' ? 'Unassigned Building' : `Building ${building}`} • Room ${room}`,
+          count: item.count,
+        };
+      }),
+    [tasks]
+  );
   const recent = useMemo(
-    () => [...tasks].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(0, 8),
+    () =>
+      [...tasks]
+        .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))
+        .slice(0, 8),
     [tasks]
   );
 
@@ -87,15 +115,23 @@ export default function DashboardView({ stats }) {
             <div className="empty">No recent activity.</div>
           ) : (
             <ul className="recent-list">
-              {recent.map((task) => (
-                <li key={task.id}>
-                  <div>
-                    <strong>{task.title}</strong>
-                    <p>{task.building} • Room {task.room} • {task.section}</p>
-                  </div>
-                  <span className={`status-pill ${task.status}`}>{task.status.replace('_', ' ')}</span>
-                </li>
-              ))}
+              {recent.map((task) => {
+                const building = sanitizeBuilding(task.building);
+                const room = sanitizeRoom(task.room);
+                const section = sanitizeSection(task.section);
+                const status = sanitizeStatus(task.status);
+                return (
+                  <li key={task.id}>
+                    <div>
+                      <strong>{formatTitle(task.title)}</strong>
+                      <p>
+                        {building === 'Unassigned' ? 'Unassigned Building' : `Building ${building}`} • Room {room} • {section}
+                      </p>
+                    </div>
+                    <span className={`status-pill ${status}`}>{formatStatusLabel(task.status)}</span>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

@@ -9,27 +9,43 @@ import SettingsView from './components/SettingsView.jsx';
 import TaskModal from './components/TaskModal.jsx';
 import { useTasks } from './context/TaskContext.jsx';
 import { exportAllTasks, exportBuildingTasks } from './utils/pdf.js';
+import { sanitizeStatus } from './utils/sanitize.js';
 
 const tabs = [
-  { id: 'rooms', label: 'Rooms', icon: ListChecks },
-  { id: 'board', label: 'Board', icon: TableProperties },
+  { id: 'tasks', label: 'Tasks', icon: ListChecks },
+  { id: 'rooms', label: 'Rooms', icon: Building2 },
+  { id: 'board', label: 'Board', icon: Kanban },
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ];
 
 export default function App() {
   const { tasks } = useTasks();
-  const [activeTab, setActiveTab] = useState('rooms');
+  const [activeTab, setActiveTab] = useState('tasks');
   const [modalTask, setModalTask] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [buildingFilter, setBuildingFilter] = useState('all');
+  const [previewPhoto, setPreviewPhoto] = useState(null);
 
-  const stats = useMemo(() => ({
-    total: tasks.length,
-    open: tasks.filter((t) => t.status === 'open').length,
-    in_progress: tasks.filter((t) => t.status === 'in_progress').length,
-    done: tasks.filter((t) => t.status === 'done').length,
-  }), [tasks]);
+  const handlePreviewPhoto = (photo) => {
+    if (!photo) return;
+    const src = photo.url || photo.thumb;
+    if (!src) return;
+    setPreviewPhoto({ src, name: photo.key || '' });
+  };
+
+  const stats = useMemo(() => {
+    const totals = { total: tasks.length, open: 0, in_progress: 0, done: 0 };
+    tasks.forEach((task) => {
+      const status = sanitizeStatus(task.status);
+      if (status in totals) {
+        totals[status] += 1;
+      } else {
+        totals.open += 1;
+      }
+    });
+    return totals;
+  }, [tasks]);
 
   const handleCreate = () => {
     setModalTask(null);
@@ -52,9 +68,9 @@ export default function App() {
 
   const ActiveView = () => {
     switch (activeTab) {
-      case 'rooms':
+      case 'tasks':
         return (
-          <RoomsView
+          <TasksView
             onCreate={handleCreate}
             onEdit={handleEdit}
             buildingFilter={buildingFilter}

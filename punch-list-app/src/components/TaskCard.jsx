@@ -2,14 +2,37 @@ import React from 'react';
 import { Calendar, Copy, Edit2, MoveLeft, MoveRight, Trash2, User } from 'lucide-react';
 import { useTasks } from '../context/TaskContext.jsx';
 import { createId } from '../utils/id.js';
+import {
+  formatAssignee,
+  formatDescription,
+  formatDueDate,
+  formatStatusLabel,
+  formatTitle,
+  sanitizeBuilding,
+  sanitizeRoom,
+  sanitizeSection,
+  sanitizeSeverity,
+  sanitizeStatus,
+} from '../utils/sanitize.js';
 
 const statusOrder = ['open', 'in_progress', 'done'];
 
 export default function TaskCard({ task, onEdit, onPhotoPreview, compact = false }) {
   const { deleteTask, updateTask, duplicateTask } = useTasks();
 
+  const currentStatus = sanitizeStatus(task.status);
+  const statusLabel = formatStatusLabel(task.status);
+  const severity = sanitizeSeverity(task.severity);
+  const building = sanitizeBuilding(task.building);
+  const room = sanitizeRoom(task.room);
+  const section = sanitizeSection(task.section);
+  const title = formatTitle(task.title);
+  const description = formatDescription(task.description);
+  const assignee = formatAssignee(task.assignee);
+  const dueDate = formatDueDate(task.dueDate);
+
   const move = (direction) => {
-    const index = statusOrder.indexOf(task.status);
+    const index = statusOrder.indexOf(currentStatus);
     if (index === -1) return;
     const nextIndex = index + direction;
     if (nextIndex < 0 || nextIndex >= statusOrder.length) return;
@@ -33,16 +56,16 @@ export default function TaskCard({ task, onEdit, onPhotoPreview, compact = false
     <div className={compact ? 'task-card compact' : 'task-card'}>
       <div className="task-header">
         <div>
-          <h4>{task.title}</h4>
-          <p className="task-meta">{task.building} • Room {task.room} • {task.section}</p>
+          <h4>{title}</h4>
+          <p className="task-meta">{building} • Room {room} • {section}</p>
         </div>
-        <span className={`status-pill ${task.status}`}>{task.status.replace('_', ' ')}</span>
+        <span className={`status-pill ${currentStatus}`}>{statusLabel}</span>
       </div>
-      <p className="task-description">{task.description}</p>
+      <p className="task-description">{description}</p>
       <div className="task-details">
-        <span className={`severity ${task.severity}`}>{task.severity}</span>
-        <span className="assignee"><User size={14} /> {task.assignee || 'Unassigned'}</span>
-        <span className="due"><Calendar size={14} /> {task.dueDate || 'No due date'}</span>
+        <span className={`severity ${severity}`}>{severity}</span>
+        <span className="assignee"><User size={14} /> {assignee}</span>
+        <span className="due"><Calendar size={14} /> {dueDate}</span>
       </div>
       {task.photos?.length > 0 && (
         <div className="photo-strip">
@@ -73,10 +96,10 @@ export default function TaskCard({ task, onEdit, onPhotoPreview, compact = false
           <Trash2 size={16} /> Delete
         </button>
         <div className="spacer" />
-        <button className="ghost" onClick={() => move(-1)} disabled={task.status === 'open'}>
+        <button className="ghost" onClick={() => move(-1)} disabled={currentStatus === 'open'}>
           <MoveLeft size={16} />
         </button>
-        <button className="ghost" onClick={() => move(1)} disabled={task.status === 'done'}>
+        <button className="ghost" onClick={() => move(1)} disabled={currentStatus === 'done'}>
           <MoveRight size={16} />
         </button>
       </div>

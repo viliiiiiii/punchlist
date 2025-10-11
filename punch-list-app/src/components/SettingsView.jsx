@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { useTasks } from '../context/TaskContext.jsx';
+import { sanitizeStatus } from '../utils/sanitize.js';
 
 export default function SettingsView() {
   const { tasks, setTasks, seedDemo, clearTasks, settings, setSettings } = useTasks();
@@ -44,7 +45,8 @@ export default function SettingsView() {
     tasks.forEach((task) => {
       if (!task.id) issues.push(`Task missing id: ${task.title}`);
       if (!task.title) issues.push(`Task missing title: ${task.id}`);
-      if (!['open', 'in_progress', 'done'].includes(task.status)) {
+      const normalizedStatus = sanitizeStatus(task.status);
+      if (!['open', 'in_progress', 'done'].includes(normalizedStatus)) {
         issues.push(`Task ${task.id} has invalid status ${task.status}`);
       }
     });
