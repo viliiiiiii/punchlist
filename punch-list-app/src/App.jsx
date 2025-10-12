@@ -10,6 +10,7 @@ import TaskModal from './components/TaskModal.jsx';
 import { useTasks } from './context/TaskContext.jsx';
 import { exportAllTasks, exportBuildingTasks } from './utils/pdf.js';
 import { sanitizeStatus } from './utils/sanitize.js';
+import { postPresign } from './utils/presign.js';
 
 const tabs = [
   { id: 'tasks', label: 'Tasks', icon: ListChecks },
@@ -20,18 +21,38 @@ const tabs = [
 ];
 
 export default function App() {
-  const { tasks } = useTasks();
+  const { tasks, settings } = useTasks();
   const [activeTab, setActiveTab] = useState('tasks');
   const [modalTask, setModalTask] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [buildingFilter, setBuildingFilter] = useState('all');
   const [previewPhoto, setPreviewPhoto] = useState(null);
 
-  const handlePreviewPhoto = (photo) => {
+  const handlePreviewPhoto = async (photo) => {
     if (!photo) return;
-    const src = photo.url || photo.thumb;
-    if (!src) return;
-    setPreviewPhoto({ src, name: photo.key || '' });
+    if (photo.url) {
+      setPreviewPhoto({ src: photo.url, name: photo.key || '' });
+      return;
+    }
+    if (photo.thumb) {
+      setPreviewPhoto({ src: photo.thumb, name: photo.key || '' });
+    }
+    if (photo.key && settings?.presignEndpoint) {
+      try {
+        const { url } = await postPresign(settings.presignEndpoint, 'download', { key: photo.key });
+        setPreviewPhoto({ src: url, name: photo.key });
+        return;
+      } catch (error) {
+        console.error('Failed to fetch download URL', error);
+        if (!photo.thumb && typeof window !== 'undefined') {
+          window.alert('Unable to load the photo preview.');
+        }
+      }
+      return;
+    }
+    if (!photo.thumb && photo.key && typeof window !== 'undefined') {
+      window.alert('Configure a presign endpoint in Settings to preview stored images.');
+    }
   };
 
   const stats = useMemo(() => {

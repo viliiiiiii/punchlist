@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Camera, ImagePlus, X } from 'lucide-react';
 import { useTasks } from '../context/TaskContext.jsx';
 import { createId } from '../utils/id.js';
+import { postPresign } from '../utils/presign.js';
 
 const sections = ['Bedroom', 'Bathroom', 'Balcony', 'Living', 'Entry', 'Other'];
 const severities = ['low', 'medium', 'high'];
@@ -35,6 +36,11 @@ async function resize(dataUrl, max) {
   const ctx = canvas.getContext('2d');
   ctx.drawImage(image, 0, 0, width, height);
   return canvas.toDataURL('image/jpeg', 0.85);
+}
+
+async function dataUrlToBlob(dataUrl) {
+  const response = await fetch(dataUrl);
+  return response.blob();
 }
 
 export default function TaskModal({ open, onClose, task }) {
@@ -84,11 +90,37 @@ export default function TaskModal({ open, onClose, task }) {
     if (files.length === 0) return;
     setSaving(true);
     const processed = [];
+    let remoteFailures = false;
     for (const file of files) {
       try {
         const raw = await readFile(file);
         const full = await resize(raw, 1200);
         const thumb = await resize(raw, 240);
+        if (settings.presignEndpoint) {
+          try {
+            const blob = await dataUrlToBlob(full);
+            const { url, key } = await postPresign(settings.presignEndpoint, 'upload', {
+              contentType: 'image/jpeg',
+              fileSize: blob.size,
+            });
+            const uploadResponse = await fetch(url, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'image/jpeg',
+                'x-amz-server-side-encryption': 'AES256',
+              },
+              body: blob,
+            });
+            if (!uploadResponse.ok) {
+              throw new Error('Upload failed');
+            }
+            processed.push({ key, url: null, thumb });
+            continue;
+          } catch (error) {
+            console.error('Remote upload failed; falling back to local storage', error);
+            remoteFailures = true;
+          }
+        }
         processed.push({ url: full, thumb, key: null });
       } catch (error) {
         console.error('Failed to process photo', error);
@@ -97,6 +129,9 @@ export default function TaskModal({ open, onClose, task }) {
     setForm((prev) => ({ ...prev, photos: [...(prev.photos || []), ...processed] }));
     setSaving(false);
     event.target.value = '';
+    if (remoteFailures && typeof window !== 'undefined') {
+      window.alert('Some photos could not be uploaded. They were stored locally instead.');
+    }
   };
 
   const removePhoto = (index) => {
