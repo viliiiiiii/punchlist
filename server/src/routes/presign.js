@@ -1,10 +1,6 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
-import { v4 as uuid } from "uuid";
-import { z } from "zod";
-import { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { s3, bucket } from "../lib/s3.js";
+import { makeKey, getPresignedPutUrl, getPresignedGetUrl, prefix } from "../lib/storage.js";
 import { getAuthenticatedUserId } from "../lib/auth.js";
 
 const router = Router();
@@ -25,18 +21,77 @@ const allowedTypes = new Set(
 
 const MAX_BYTES = Number.parseInt(process.env.MAX_UPLOAD_BYTES || "5242880", 10);
 
-const uploadSchema = z
-  .object({
-    contentType: z.string().min(1, "contentType is required"),
-    fileSize: z.number({ invalid_type_error: "fileSize must be a number" }).int().positive("fileSize must be positive"),
-  })
-  .strict();
+function validateUploadPayload(body) {
+  const errors = {};
+  if (!body || typeof body !== "object") {
+    return { valid: false, errors: { message: "Body must be an object" } };
+  }
+  const { contentType, fileSize } = body;
+  if (typeof contentType !== "string" || !contentType.trim()) {
+    errors.contentType = "contentType is required";
+  }
+  if (!Number.isInteger(fileSize) || fileSize <= 0) {
+    errors.fileSize = "fileSize must be a positive integer";
+  }
+  return Object.keys(errors).length > 0
+    ? { valid: false, errors }
+    : { valid: true, data: { contentType: contentType.trim(), fileSize } };
+}
 
-const downloadSchema = z
-  .object({
-    key: z.string().min(1, "key is required"),
-  })
-  .strict();
+function validateDownloadPayload(body) {
+  if (!body || typeof body !== "object" || typeof body.key !== "string" || !body.key.trim()) {
+    return { valid: false, errors: { key: "key is required" } };
+  }
+  return { valid: true, data: { key: body.key.trim() } };
+}
+
+export async function handlePresignUpload(req, res) {
+  const result = validateUploadPayload(req.body);
+  if (!result.valid) {
+    return res.status(400).json({ error: "Invalid request", details: result.errors });
+  }
+
+  const { contentType, fileSize } = result.data;
+
+  if (!allowedTypes.has(contentType)) {
+    return res.status(400).json({ error: "Unsupported content type" });
+  }
+
+  if (Number.isNaN(MAX_BYTES) || MAX_BYTES <= 0) {
+    return res.status(500).json({ error: "Upload limit is not configured" });
+  }
+
+  if (fileSize > MAX_BYTES) {
+    return res.status(413).json({ error: "File too large" });
+  }
+
+  const userId = getAuthenticatedUserId(req);
+  const extension = contentType.includes("/") ? contentType.split("/")[1] : undefined;
+  const key = makeKey({ userId, extension });
+
+  const url = await getPresignedPutUrl({ key, contentType });
+
+  return res.json({ url, key });
+}
+
+export async function handlePresignDownload(req, res) {
+  const result = validateDownloadPayload(req.body);
+  if (!result.valid) {
+    return res.status(400).json({ error: "Invalid request", details: result.errors });
+  }
+
+  const { key } = result.data;
+  const userId = getAuthenticatedUserId(req);
+  const userPrefix = `${prefix}/${userId}/`;
+
+  if (!key.startsWith(userPrefix)) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  const url = await getPresignedGetUrl({ key });
+
+  return res.json({ url });
+}
 
 function asyncHandler(handler) {
   return async (req, res, next) => {
@@ -48,80 +103,7 @@ function asyncHandler(handler) {
   };
 }
 
-router.post(
-  "/presign/upload",
-  limiter,
-  asyncHandler(async (req, res) => {
-    const parsed = uploadSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
-    }
-
-    const { contentType, fileSize } = parsed.data;
-
-    if (!allowedTypes.has(contentType)) {
-      return res.status(400).json({ error: "Unsupported content type" });
-    }
-
-    if (Number.isNaN(MAX_BYTES) || MAX_BYTES <= 0) {
-      return res.status(500).json({ error: "Upload limit is not configured" });
-    }
-
-    if (fileSize > MAX_BYTES) {
-      return res.status(413).json({ error: "File too large" });
-    }
-
-    if (!bucket) {
-      return res.status(500).json({ error: "Storage bucket is not configured" });
-    }
-
-    const userId = getAuthenticatedUserId(req);
-    const key = `uploads/${userId}/${uuid()}`;
-
-    const command = new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      ContentType: contentType,
-      ServerSideEncryption: "AES256",
-    });
-
-    const url = await getSignedUrl(s3, command, { expiresIn: 60 });
-
-    return res.json({ url, key });
-  })
-);
-
-router.post(
-  "/presign/download",
-  limiter,
-  asyncHandler(async (req, res) => {
-    const parsed = downloadSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
-    }
-
-    if (!bucket) {
-      return res.status(500).json({ error: "Storage bucket is not configured" });
-    }
-
-    const { key } = parsed.data;
-    const userId = getAuthenticatedUserId(req);
-    const userPrefix = `uploads/${userId}/`;
-
-    if (!key.startsWith(userPrefix)) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
-
-    const command = new GetObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      ResponseContentType: undefined,
-    });
-
-    const url = await getSignedUrl(s3, command, { expiresIn: 300 });
-
-    return res.json({ url });
-  })
-);
+router.post("/presign/upload", limiter, asyncHandler(handlePresignUpload));
+router.post("/presign/download", limiter, asyncHandler(handlePresignDownload));
 
 export default router;

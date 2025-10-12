@@ -107,7 +107,6 @@ export default function TaskModal({ open, onClose, task }) {
               method: 'PUT',
               headers: {
                 'Content-Type': 'image/jpeg',
-                'x-amz-server-side-encryption': 'AES256',
               },
               body: blob,
             });
