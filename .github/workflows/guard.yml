@@ -1,0 +1,26 @@
+name: Function Baseline Guard
+
+on:
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+
+      - name: Export current functions
+        run: php scripts/export_functions.php > current_functions.json
+
+      - name: Compare with baseline
+        run: |
+          php -r '$current=json_decode(file_get_contents("current_functions.json"),true); $baseline=json_decode(file_get_contents("baseline_functions.json"),true); if (!$current || !$baseline) { fwrite(STDERR, "Unable to parse function manifests\n"); exit(1);} if ($current["files"] !== $baseline["files"]) { fwrite(STDERR, "Function baseline mismatch. Run scripts/export_functions.php to update baseline_functions.json if intentional.\n"); exit(1);} '

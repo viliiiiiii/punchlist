@@ -1,6 +1,10 @@
 <?php
 require_once __DIR__ . '/helpers.php';
 require_login();
+if (!can('view')) {
+    http_response_code(403);
+    exit('Forbidden');
+}
 
 if (isset($_GET['action']) && $_GET['action'] === 'by_building') {
     $buildingId = (int)($_GET['id'] ?? 0);
@@ -17,6 +21,10 @@ $pdo = get_pdo();
 $errors = [];
 
 if (is_post()) {
+    if (!can('edit')) {
+        http_response_code(403);
+        exit('Forbidden');
+    }
     if (!verify_csrf_token($_POST[CSRF_TOKEN_NAME] ?? null)) {
         $errors['csrf'] = 'Invalid CSRF token.';
     } elseif (isset($_POST['add_building'])) {

@@ -20,17 +20,30 @@ if (file_exists($autoloadPath)) {
 if (!defined('HELPERS_BOOTSTRAPPED')) {
     define('HELPERS_BOOTSTRAPPED', true);
 
-    function get_pdo(): PDO {
-        static $pdo;
-        if ($pdo === null) {
-            $dsn = sprintf('mysql:host=%s;dbname=%s;charset=%s', DB_HOST, DB_NAME, DB_CHARSET);
-            $options = [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_EMULATE_PREPARES => false,
-            ];
-            $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+    function get_pdo(string $which = 'apps'): PDO {
+        static $pool = [];
+        if (isset($pool[$which])) {
+            return $pool[$which];
         }
+
+        if ($which === 'core') {
+            $dsn = CORE_DSN;
+            $user = CORE_DB_USER;
+            $pass = CORE_DB_PASS;
+        } else {
+            $dsn = APPS_DSN;
+            $user = APPS_DB_USER;
+            $pass = APPS_DB_PASS;
+        }
+
+        $options = [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false,
+        ];
+
+        $pdo = new PDO($dsn, $user, $pass, $options);
+        $pool[$which] = $pdo;
         return $pdo;
     }
 
@@ -62,7 +75,20 @@ if (!defined('HELPERS_BOOTSTRAPPED')) {
     }
 
     function current_user(): ?array { return $_SESSION['user'] ?? null; }
-    function require_login(): void { if (!current_user()) { header('Location: login.php'); exit; } }
+    function require_login(): void {
+        if (!current_user()) {
+            header('Location: login.php');
+            exit;
+        }
+        $user = current_user();
+        $userId = $user['id'] ?? null;
+        $sessionMarker = session_id();
+        if (!isset($_SESSION['login_logged_marker']) || $_SESSION['login_logged_marker'] !== $sessionMarker) {
+            $_SESSION['login_logged_marker'] = $sessionMarker;
+            log_event('login', 'user', $userId ? (int)$userId : null);
+        }
+        enforce_not_suspended();
+    }
     function is_post(): bool { return ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'; }
     function sanitize(string $v): string { return htmlspecialchars($v, ENT_QUOTES|ENT_SUBSTITUTE, 'UTF-8'); }
 
@@ -128,7 +154,7 @@ function photo_public_url(array|string $photoOrKey, ?int $maxWidth = null): stri
     $key = is_array($photoOrKey) ? ($photoOrKey['s3_key'] ?? '') : $photoOrKey;
     if ($key === '') return '#';
     // (maxWidth reserved for future; not used by file.php now)
-    return '/file.php?key=' . rawurlencode($key);
+    return '/download.php?key=' . rawurlencode($key);
 }
 
     function s3_object_url(string $key): string {
@@ -426,4 +452,129 @@ function photo_public_url(array|string $photoOrKey, ?int $maxWidth = null): stri
         echo json_encode($data);
         exit;
     }
+
+    /* CODEGEN EXTENSIONS START */
+    function core_user_record(int $userId): ?array {
+        static $cache = [];
+        if (array_key_exists($userId, $cache)) {
+            return $cache[$userId];
+        }
+        try {
+            $stmt = get_pdo('core')->prepare('SELECT u.*, r.key_slug AS role_key FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?');
+            $stmt->execute([$userId]);
+            $row = $stmt->fetch();
+            if ($row) {
+                $cache[$userId] = $row;
+                return $row;
+            }
+        } catch (Throwable $e) {
+            $cache[$userId] = null;
+        }
+        return $cache[$userId] ?? null;
+    }
+
+    function current_user_role_key(): string {
+        $user = current_user();
+        if (!$user) {
+            return 'viewer';
+        }
+        $record = null;
+        if (!empty($user['id'])) {
+            $record = core_user_record((int)$user['id']);
+        }
+        if ($record && !empty($record['role_key'])) {
+            return (string)$record['role_key'];
+        }
+        if (!empty($user['role'])) {
+            return (string)$user['role'];
+        }
+        return 'viewer';
+    }
+
+    function current_user_sector_id(): ?int {
+        $user = current_user();
+        if (!$user || empty($user['id'])) {
+            return null;
+        }
+        $record = core_user_record((int)$user['id']);
+        if ($record && isset($record['sector_id'])) {
+            return $record['sector_id'] !== null ? (int)$record['sector_id'] : null;
+        }
+        return null;
+    }
+
+    function can(string $perm): bool {
+        $role = current_user_role_key();
+        if ($role === 'root') {
+            return true;
+        }
+        $map = [
+            'viewer' => ['view', 'download'],
+            'admin' => ['view', 'download', 'edit', 'inventory_manage'],
+        ];
+        return in_array($perm, $map[$role] ?? [], true);
+    }
+
+    function require_perm(string $perm): void {
+        require_login();
+        if (!can($perm)) {
+            http_response_code(403);
+            exit('Forbidden');
+        }
+    }
+
+    function enforce_not_suspended(): void {
+        $user = current_user();
+        if (!$user || empty($user['id'])) {
+            return;
+        }
+        $record = core_user_record((int)$user['id']);
+        if ($record && !empty($record['suspended_at'])) {
+            unset($_SESSION['user']);
+            $_SESSION['flash'] = ['message' => 'Account suspended.', 'type' => 'error'];
+            header('Location: login.php');
+            exit;
+        }
+    }
+
+    function log_event(string $action, ?string $type = null, ?int $id = null, array $meta = []): void {
+        try {
+            $pdo = get_pdo('core');
+        } catch (Throwable $e) {
+            return;
+        }
+
+        $userId = null;
+        $user = current_user();
+        if ($user && isset($user['id'])) {
+            $userId = (int)$user['id'];
+        }
+
+        $ipRaw = $_SERVER['REMOTE_ADDR'] ?? null;
+        $ipBinary = null;
+        if ($ipRaw) {
+            $packed = @inet_pton($ipRaw);
+            if ($packed !== false) {
+                $ipBinary = $packed;
+            }
+        }
+
+        $metaJson = $meta ? json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null;
+
+        try {
+            $stmt = $pdo->prepare('INSERT INTO activity_log (user_id, action, entity_type, entity_id, meta, ip, ua) VALUES (:user_id, :action, :entity_type, :entity_id, :meta, :ip, :ua)');
+            $stmt->execute([
+                ':user_id' => $userId,
+                ':action' => $action,
+                ':entity_type' => $type,
+                ':entity_id' => $id,
+                ':meta' => $metaJson,
+                ':ip' => $ipBinary,
+                ':ua' => substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255),
+            ]);
+        } catch (Throwable $e) {
+            // swallow logging errors
+        }
+    }
+    /* CODEGEN EXTENSIONS END */
 }

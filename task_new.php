@@ -2,6 +2,10 @@
 declare(strict_types=1);
 require_once __DIR__ . '/helpers.php';
 require_login();
+if (!can('edit')) {
+    http_response_code(403);
+    exit('Forbidden');
+}
 
 $pdo = get_pdo();
 $errors = [];
@@ -97,6 +101,7 @@ if (is_post()) {
                 upsert_photo($createdTaskId, $pos, $key, $url);
             }
 
+            log_event('task.create', 'task', $createdTaskId);
             header('Location: task_edit.php?id=' . $createdTaskId);
             exit;
         } catch (Throwable $e) {

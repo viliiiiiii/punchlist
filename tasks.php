@@ -1,6 +1,10 @@
 <?php
 require_once __DIR__ . '/helpers.php';
 require_login();
+if (!can('view')) {
+    http_response_code(403);
+    exit('Forbidden');
+}
 
 $filters   = get_filter_values();
 $page      = max(1, (int)($_GET['page'] ?? 1));
@@ -28,7 +32,9 @@ include __DIR__ . '/includes/header.php';
     <div class="card-header">
         <h1>Tasks</h1>
         <div class="actions">
+            <?php if (can('edit')): ?>
             <a class="btn primary" href="task_new.php">New Task</a>
+            <?php endif; ?>
             <a class="btn" href="export_table_pdf_wkhtml.php?<?php echo $baseQuery; ?>" target="_blank">Export PDF</a>
             <a class="btn" href="export_table_pdf.php?<?php echo $baseQuery; ?>" target="_blank">Export PDF W/O pictures </a>
 
