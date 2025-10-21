@@ -1,6 +1,10 @@
 <?php
 require_once __DIR__ . '/helpers.php';
 require_login();
+if (!can('edit')) {
+    http_response_code(403);
+    exit('Forbidden');
+}
 
 $taskId = (int)($_GET['id'] ?? 0);
 $task = fetch_task($taskId);
@@ -18,6 +22,7 @@ if (is_post()) {
         $errors['csrf'] = 'Invalid CSRF token.';
     } elseif (isset($_POST['delete_task'])) {
         delete_task($taskId);
+        log_event('task.delete', 'task', $taskId);
         redirect_with_message('tasks.php', 'Task deleted.', 'success');
     } else {
         $data = [
@@ -36,6 +41,7 @@ if (is_post()) {
             $errors['room_id'] = 'Selected room does not belong to building.';
         } else {
             update_task($taskId, $data);
+            log_event('task.update', 'task', $taskId);
             redirect_with_message('task_view.php?id=' . $taskId, 'Task updated successfully.');
         }
         if ($data['building_id']) {

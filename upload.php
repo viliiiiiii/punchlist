@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/helpers.php';
+require_login();
 header('Content-Type: application/json');
 
 function fail(int $code, string $msg) {
@@ -15,6 +16,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
 
 if (!verify_csrf_token($_POST['csrf_token'] ?? null)) {
     fail(422, 'Invalid CSRF token');
+}
+
+if (!can('edit')) {
+    fail(403, 'Forbidden');
 }
 
 $taskId   = isset($_POST['task_id']) ? (int)$_POST['task_id'] : 0;
@@ -81,6 +86,7 @@ s3_client()->putObject([
     $url = s3_object_url($key);
     upsert_photo($taskId, $position, $key, $url);
 
+    log_event('photo.upload', 'photo', $taskId, ['key' => $key, 'position' => $position]);
     echo json_encode(['ok'=>true, 'url'=>$url, 'position'=>$position]);
 } catch (Throwable $e) {
     // Server error (S3/DB/others)
