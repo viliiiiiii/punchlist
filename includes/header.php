@@ -10,6 +10,7 @@ $roleKey = current_user_role_key();
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?php echo sanitize($title); ?> - <?php echo sanitize(APP_TITLE); ?></title>
+    <link rel="stylesheet" href="/app.css">
 </head>
 <body>
 <header class="site-header">
