@@ -30,3 +30,12 @@ define('CSRF_TOKEN_NAME', 'csrf_token');
 define('APP_TIMEZONE', 'UTC');
 
 define('APP_TITLE', 'Punch List Manager');
+
+// Dual database support (core governance + application data)
+define('APPS_DSN', getenv('APPS_DSN') ?: sprintf('mysql:host=%s;dbname=%s;charset=%s', DB_HOST, DB_NAME, DB_CHARSET));
+define('APPS_DB_USER', getenv('APPS_DB_USER') ?: DB_USER);
+define('APPS_DB_PASS', getenv('APPS_DB_PASS') ?: DB_PASS);
+
+define('CORE_DSN', getenv('CORE_DSN') ?: APPS_DSN);
+define('CORE_DB_USER', getenv('CORE_DB_USER') ?: APPS_DB_USER);
+define('CORE_DB_PASS', getenv('CORE_DB_PASS') ?: APPS_DB_PASS);
