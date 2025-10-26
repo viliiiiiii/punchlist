@@ -184,117 +184,175 @@ include __DIR__ . '/../includes/header.php';
             <?php echo sanitize(implode(' ', $errors)); ?>
         </div>
     <?php endif; ?>
-    <form class="grid three" method="get">
-        <label>Role
-            <select name="role">
-                <option value="">All</option>
-                <?php foreach ($roles as $role): ?>
-                    <option value="<?php echo sanitize($role['key_slug']); ?>" <?php echo $filterRole === $role['key_slug'] ? 'selected' : ''; ?>><?php echo sanitize($role['label']); ?></option>
-                <?php endforeach; ?>
-            </select>
-        </label>
-        <label>Sector
-            <select name="sector">
-                <option value="">All</option>
-                <option value="none" <?php echo $filterSector === 'none' ? 'selected' : ''; ?>>Unassigned</option>
-                <?php foreach ($sectors as $sector): ?>
-                    <option value="<?php echo (int)$sector['id']; ?>" <?php echo ((string)$sector['id'] === $filterSector) ? 'selected' : ''; ?>><?php echo sanitize($sector['name']); ?></option>
-                <?php endforeach; ?>
-            </select>
-        </label>
-        <div class="filter-actions">
-            <button class="btn" type="submit">Filter</button>
-            <a class="btn secondary" href="users.php">Reset</a>
+
+    <!-- Filters -->
+    <form class="form-compact" method="get">
+        <div class="grid-compact">
+            <label class="field">
+                <span class="lbl">Role</span>
+                <select name="role">
+                    <option value="">All</option>
+                    <?php foreach ($roles as $role): ?>
+                        <option value="<?php echo sanitize($role['key_slug']); ?>" <?php echo $filterRole === $role['key_slug'] ? 'selected' : ''; ?>>
+                            <?php echo sanitize($role['label']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+
+            <label class="field">
+                <span class="lbl">Sector</span>
+                <select name="sector">
+                    <option value="">All</option>
+                    <option value="none" <?php echo $filterSector === 'none' ? 'selected' : ''; ?>>Unassigned</option>
+                    <?php foreach ($sectors as $sector): ?>
+                        <option value="<?php echo (int)$sector['id']; ?>" <?php echo ((string)$sector['id'] === $filterSector) ? 'selected' : ''; ?>>
+                            <?php echo sanitize($sector['name']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+
+            <div class="form-actions-compact field-span-2">
+                <button class="btn primary btn-compact" type="submit">Filter</button>
+                <a class="btn secondary btn-compact" href="users.php">Reset</a>
+            </div>
         </div>
     </form>
 </section>
 
 <section class="card">
     <h2>Create User</h2>
-    <form method="post" class="grid four">
-        <label>Email
-            <input type="email" name="email" required>
-        </label>
-        <label>Password
-            <input type="password" name="password" required>
-        </label>
-        <label>Role
-            <select name="role">
-                <?php foreach ($roles as $role): ?>
-                    <option value="<?php echo sanitize($role['key_slug']); ?>"><?php echo sanitize($role['label']); ?></option>
-                <?php endforeach; ?>
-            </select>
-        </label>
-        <label>Sector
-            <select name="sector">
-                <option value="null">Unassigned</option>
-                <?php foreach ($sectors as $sector): ?>
-                    <option value="<?php echo (int)$sector['id']; ?>"><?php echo sanitize($sector['name']); ?></option>
-                <?php endforeach; ?>
-            </select>
-        </label>
-        <input type="hidden" name="action" value="create">
-        <input type="hidden" name="<?php echo CSRF_TOKEN_NAME; ?>" value="<?php echo csrf_token(); ?>">
-        <div class="form-actions">
-            <button class="btn primary" type="submit">Create</button>
+    <form method="post" class="form-compact">
+        <div class="grid-compact">
+            <label class="field">
+                <span class="lbl">Email</span>
+                <input type="email" name="email" required>
+            </label>
+
+            <label class="field">
+                <span class="lbl">Password</span>
+                <input type="password" name="password" required>
+            </label>
+
+            <label class="field">
+                <span class="lbl">Role</span>
+                <select name="role">
+                    <?php foreach ($roles as $role): ?>
+                        <option value="<?php echo sanitize($role['key_slug']); ?>"><?php echo sanitize($role['label']); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+
+            <label class="field">
+                <span class="lbl">Sector</span>
+                <select name="sector">
+                    <option value="null">Unassigned</option>
+                    <?php foreach ($sectors as $sector): ?>
+                        <option value="<?php echo (int)$sector['id']; ?>"><?php echo sanitize($sector['name']); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+
+            <input type="hidden" name="action" value="create">
+            <input type="hidden" name="<?php echo CSRF_TOKEN_NAME; ?>" value="<?php echo csrf_token(); ?>">
+
+            <div class="form-actions-compact field-span-2">
+                <button class="btn primary btn-compact" type="submit">Create</button>
+            </div>
         </div>
     </form>
 </section>
 
 <section class="card">
     <h2>Existing Users</h2>
-    <table class="table">
+    <table class="table table-excel">
         <thead>
             <tr>
                 <th>Email</th>
-                <th>Role</th>
+                <th class="col-status">Role</th>
                 <th>Sector</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th class="col-status">Status</th>
+                <th class="col-actions">Actions</th>
             </tr>
         </thead>
         <tbody>
         <?php foreach ($users as $user): ?>
             <tr>
-                <td><?php echo sanitize($user['email']); ?></td>
-                <td><?php echo sanitize($user['role_label']); ?></td>
-                <td><?php echo $user['sector_name'] ? sanitize($user['sector_name']) : '<em>Unassigned</em>'; ?></td>
-                <td><?php echo $user['suspended_at'] ? '<span class="status status-error">Suspended</span>' : '<span class="status status-success">Active</span>'; ?></td>
-                <td>
+                <td data-label="Email"><?php echo sanitize($user['email']); ?></td>
+
+                <td data-label="Role">
+                    <span class="badge"><?php echo sanitize($user['role_label']); ?></span>
+                </td>
+
+                <td data-label="Sector">
+                    <?php echo $user['sector_name'] ? sanitize($user['sector_name']) : '<em class="muted">Unassigned</em>'; ?>
+                </td>
+
+                <td data-label="Status">
+                    <?php
+                        echo $user['suspended_at']
+                            ? '<span class="badge priority-mid">Suspended</span>'
+                            : '<span class="badge priority-low">Active</span>';
+                    ?>
+                </td>
+
+                <td data-label="Actions" class="col-actions">
                     <details>
-                        <summary>Edit</summary>
-                        <form method="post" class="form-inline">
-                            <label>Email
-                                <input type="email" name="email" value="<?php echo sanitize($user['email']); ?>" required>
-                            </label>
-                            <label>Role
-                                <select name="role">
-                                    <?php foreach ($roles as $role): ?>
-                                        <option value="<?php echo sanitize($role['key_slug']); ?>" <?php echo $user['role_key'] === $role['key_slug'] ? 'selected' : ''; ?>><?php echo sanitize($role['label']); ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </label>
-                            <label>Sector
-                                <select name="sector">
-                                    <option value="null">Unassigned</option>
-                                    <?php foreach ($sectors as $sector): ?>
-                                        <option value="<?php echo (int)$sector['id']; ?>" <?php echo ($user['sector_id'] == $sector['id']) ? 'selected' : ''; ?>><?php echo sanitize($sector['name']); ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </label>
-                            <label>New Password
-                                <input type="password" name="password" placeholder="Leave blank to keep current">
-                            </label>
-                            <input type="hidden" name="action" value="update">
-                            <input type="hidden" name="user_id" value="<?php echo (int)$user['id']; ?>">
-                            <input type="hidden" name="<?php echo CSRF_TOKEN_NAME; ?>" value="<?php echo csrf_token(); ?>">
-                            <button class="btn small primary" type="submit">Save</button>
+                        <summary class="btn small">Edit</summary>
+
+                        <form method="post" class="form-compact" style="margin-top:.5rem;">
+                            <div class="grid-compact">
+                                <label class="field">
+                                    <span class="lbl">Email</span>
+                                    <input type="email" name="email" value="<?php echo sanitize($user['email']); ?>" required>
+                                </label>
+
+                                <label class="field">
+                                    <span class="lbl">Role</span>
+                                    <select name="role">
+                                        <?php foreach ($roles as $role): ?>
+                                            <option value="<?php echo sanitize($role['key_slug']); ?>" <?php echo $user['role_key'] === $role['key_slug'] ? 'selected' : ''; ?>>
+                                                <?php echo sanitize($role['label']); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </label>
+
+                                <label class="field">
+                                    <span class="lbl">Sector</span>
+                                    <select name="sector">
+                                        <option value="null">Unassigned</option>
+                                        <?php foreach ($sectors as $sector): ?>
+                                            <option value="<?php echo (int)$sector['id']; ?>" <?php echo ($user['sector_id'] == $sector['id']) ? 'selected' : ''; ?>>
+                                                <?php echo sanitize($sector['name']); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </label>
+
+                                <label class="field">
+                                    <span class="lbl">New Password</span>
+                                    <input type="password" name="password" placeholder="Leave blank to keep current">
+                                </label>
+
+                                <input type="hidden" name="action" value="update">
+                                <input type="hidden" name="user_id" value="<?php echo (int)$user['id']; ?>">
+                                <input type="hidden" name="<?php echo CSRF_TOKEN_NAME; ?>" value="<?php echo csrf_token(); ?>">
+
+                                <div class="form-actions-compact field-span-2">
+                                    <button class="btn primary btn-compact" type="submit">Save</button>
+                                </div>
+                            </div>
                         </form>
-                        <form method="post" class="form-inline">
+
+                        <form method="post" class="form-compact" style="margin-top:.5rem;">
                             <input type="hidden" name="user_id" value="<?php echo (int)$user['id']; ?>">
                             <input type="hidden" name="action" value="<?php echo $user['suspended_at'] ? 'unsuspend' : 'suspend'; ?>">
                             <input type="hidden" name="<?php echo CSRF_TOKEN_NAME; ?>" value="<?php echo csrf_token(); ?>">
-                            <button class="btn small" type="submit"><?php echo $user['suspended_at'] ? 'Unsuspend' : 'Suspend'; ?></button>
+                            <button class="btn small <?php echo $user['suspended_at'] ? '' : 'secondary'; ?>" type="submit">
+                                <?php echo $user['suspended_at'] ? 'Unsuspend' : 'Suspend'; ?>
+                            </button>
                         </form>
                     </details>
                 </td>

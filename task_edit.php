@@ -36,7 +36,7 @@ if (is_post()) {
             'due_date' => $_POST['due_date'] ?? null,
         ];
         if (!validate_task_payload($data, $errors)) {
-            // validation messages
+            // validation messages set into $errors
         } elseif (!ensure_building_room_valid($data['building_id'], $data['room_id'])) {
             $errors['room_id'] = 'Selected room does not belong to building.';
         } else {
@@ -54,6 +54,8 @@ if (is_post()) {
 $title = 'Edit Task';
 include __DIR__ . '/includes/header.php';
 ?>
+<script defer src="/assets/js/photos.js"></script>
+
 <section class="card card-compact">
   <div class="card-header">
     <h1>Edit Task #<?php echo $taskId; ?></h1>
@@ -147,7 +149,7 @@ include __DIR__ . '/includes/header.php';
     </div>
   </form>
 
-  <!-- hidden delete form (keeps your original server flow) -->
+  <!-- hidden delete form -->
   <form method="post" data-delete style="display:none">
     <input type="hidden" name="<?php echo CSRF_TOKEN_NAME; ?>" value="<?php echo csrf_token(); ?>">
     <input type="hidden" name="delete_task" value="1">
@@ -179,17 +181,25 @@ include __DIR__ . '/includes/header.php';
           <div class="muted small">No photo</div>
         <?php endif; ?>
 
-        <form data-upload-form enctype="multipart/form-data" class="photo-upload-inline">
+        <form
+          action="/upload.php"
+          method="post"
+          enctype="multipart/form-data"
+          class="photo-upload-inline"
+          data-upload-form
+        >
           <input type="hidden" name="task_id" value="<?php echo $taskId; ?>">
           <input type="hidden" name="position" value="<?php echo $i; ?>">
           <input type="hidden" name="<?php echo CSRF_TOKEN_NAME; ?>" value="<?php echo csrf_token(); ?>">
-          <input class="file-compact" type="file" name="photo" accept="image/jpeg,image/png,image/webp" required>
+          <!-- Allow camera + HEIC on mobile -->
+          <input class="file-compact" type="file" name="photo" accept="image/*,image/heic,image/heif" required>
           <button class="btn small btn-compact" type="submit"><?php echo $photo ? 'Replace' : 'Upload'; ?></button>
         </form>
+
       </div>
     <?php endfor; ?>
   </div>
+  <p class="muted small" style="margin-top:.5rem">JPG/PNG/WebP/HEIC, up to 70&nbsp;MB each.</p>
 </section>
-
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

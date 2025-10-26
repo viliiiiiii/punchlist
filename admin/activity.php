@@ -76,39 +76,53 @@ include __DIR__ . '/../includes/header.php';
 ?>
 <section class="card">
     <h1>Activity Log</h1>
-    <form method="get" class="grid four">
-        <label>User
-            <select name="user_id">
-                <option value="">All</option>
-                <?php foreach ($userOptions as $user): ?>
-                    <option value="<?php echo (int)$user['id']; ?>" <?php echo ($filters['user_id'] == $user['id']) ? 'selected' : ''; ?>><?php echo sanitize($user['email']); ?></option>
-                <?php endforeach; ?>
-            </select>
-        </label>
-        <label>Action
-            <input type="text" name="action" value="<?php echo sanitize($filters['action']); ?>" placeholder="e.g. task.create">
-        </label>
-        <label>From
-            <input type="date" name="from" value="<?php echo sanitize($filters['from']); ?>">
-        </label>
-        <label>To
-            <input type="date" name="to" value="<?php echo sanitize($filters['to']); ?>">
-        </label>
-        <div class="form-actions">
-            <button class="btn" type="submit">Filter</button>
-            <a class="btn secondary" href="activity.php">Reset</a>
+
+    <form method="get" class="form-compact">
+        <div class="grid-compact">
+            <label class="field">
+                <span class="lbl">User</span>
+                <select name="user_id">
+                    <option value="">All</option>
+                    <?php foreach ($userOptions as $user): ?>
+                        <option value="<?php echo (int)$user['id']; ?>" <?php echo ($filters['user_id'] == $user['id']) ? 'selected' : ''; ?>>
+                            <?php echo sanitize($user['email']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+
+            <label class="field">
+                <span class="lbl">Action</span>
+                <input type="text" name="action" value="<?php echo sanitize($filters['action']); ?>" placeholder="e.g. task.create">
+            </label>
+
+            <label class="field">
+                <span class="lbl">From</span>
+                <input type="date" name="from" value="<?php echo sanitize($filters['from']); ?>">
+            </label>
+
+            <label class="field">
+                <span class="lbl">To</span>
+                <input type="date" name="to" value="<?php echo sanitize($filters['to']); ?>">
+            </label>
+
+            <div class="form-actions-compact field-span-3">
+                <button class="btn primary btn-compact" type="submit">Filter</button>
+                <a class="btn secondary btn-compact" href="activity.php">Reset</a>
+            </div>
         </div>
     </form>
 </section>
 
 <section class="card">
     <h2>Results</h2>
-    <table class="table">
+
+    <table class="table table-excel">
         <thead>
             <tr>
-                <th>Time</th>
+                <th class="col-id">Time</th>
                 <th>User</th>
-                <th>Action</th>
+                <th class="col-status">Action</th>
                 <th>Entity</th>
                 <th>Meta</th>
                 <th>IP</th>
@@ -118,24 +132,47 @@ include __DIR__ . '/../includes/header.php';
         <tbody>
         <?php foreach ($rows as $row): ?>
             <tr>
-                <td><?php echo sanitize($row['ts']); ?></td>
-                <td><?php echo $row['email'] ? sanitize($row['email']) : '<em>System</em>'; ?></td>
-                <td><?php echo sanitize($row['action']); ?></td>
-                <td><?php echo sanitize(trim($row['entity_type'] . '#' . ($row['entity_id'] ?? ''))); ?></td>
-                <td><?php echo render_meta($row['meta']); ?></td>
-                <td><?php echo sanitize(render_ip($row['ip'])); ?></td>
-                <td><?php echo sanitize($row['ua'] ?? ''); ?></td>
+                <td data-label="Time"><?php echo sanitize($row['ts']); ?></td>
+
+                <td data-label="User">
+                    <?php echo $row['email'] ? sanitize($row['email']) : '<em class="muted">System</em>'; ?>
+                </td>
+
+                <td data-label="Action">
+                    <span class="badge"><?php echo sanitize($row['action']); ?></span>
+                </td>
+
+                <td data-label="Entity">
+                    <?php echo sanitize(trim($row['entity_type'] . '#' . ($row['entity_id'] ?? ''))); ?>
+                </td>
+
+                <td data-label="Meta">
+                    <div class="truncate-2"><?php echo render_meta($row['meta']); ?></div>
+                </td>
+
+                <td data-label="IP">
+                    <code><?php echo sanitize(render_ip($row['ip'])); ?></code>
+                </td>
+
+                <td data-label="User Agent">
+                    <span class="muted small"><?php echo sanitize($row['ua'] ?? ''); ?></span>
+                </td>
             </tr>
         <?php endforeach; ?>
         </tbody>
     </table>
+
     <?php if ($pages > 1): ?>
-        <nav class="pagination">
+        <nav class="pagination" aria-label="Activity pages">
             <?php for ($p = 1; $p <= $pages; $p++): ?>
                 <?php $query = http_build_query(array_merge($filters, ['page' => $p])); ?>
-                <a class="page-link <?php echo $p === $page ? 'active' : ''; ?>" href="?<?php echo $query; ?>"><?php echo $p; ?></a>
+                <a
+                  class="btn small <?php echo $p === $page ? 'primary' : 'secondary'; ?>"
+                  href="?<?php echo $query; ?>"
+                ><?php echo $p; ?></a>
             <?php endfor; ?>
         </nav>
     <?php endif; ?>
 </section>
+
 <?php include __DIR__ . '/../includes/footer.php'; ?>

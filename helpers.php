@@ -5,6 +5,7 @@ require_once __DIR__ . '/config.php';
 
 date_default_timezone_set(APP_TIMEZONE);
 
+// Ensure session started
 if (session_status() === PHP_SESSION_NONE) {
     session_name(SESSION_NAME);
     session_start();
@@ -20,32 +21,34 @@ if (file_exists($autoloadPath)) {
 if (!defined('HELPERS_BOOTSTRAPPED')) {
     define('HELPERS_BOOTSTRAPPED', true);
 
+    /**
+     * Return a PDO connection to either the application DB ("apps" = punchlist)
+     * or the core governance DB ("core" = users/roles/activity).
+     */
     function get_pdo(string $which = 'apps'): PDO {
         static $pool = [];
-        if (isset($pool[$which])) {
-            return $pool[$which];
-        }
+        if (isset($pool[$which])) return $pool[$which];
 
         if ($which === 'core') {
-            $dsn = CORE_DSN;
+            $dsn  = CORE_DSN;
             $user = CORE_DB_USER;
             $pass = CORE_DB_PASS;
         } else {
-            $dsn = APPS_DSN;
+            $dsn  = APPS_DSN;
             $user = APPS_DB_USER;
             $pass = APPS_DB_PASS;
         }
 
-        $options = [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        $pdo = new PDO($dsn, $user, $pass, [
+            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false,
-        ];
-
-        $pdo = new PDO($dsn, $user, $pass, $options);
+            PDO::ATTR_EMULATE_PREPARES   => false,
+        ]);
         $pool[$which] = $pdo;
         return $pdo;
     }
+
+    /* ===== Security: CSRF, flash, redirects ===== */
 
     function csrf_token(): string {
         if (empty($_SESSION[CSRF_TOKEN_NAME])) {
@@ -65,22 +68,88 @@ if (!defined('HELPERS_BOOTSTRAPPED')) {
     }
 
     function flash_message(): void {
-        if (!empty($_SESSION['flash'])) {
-            $flash = $_SESSION['flash'];
-            unset($_SESSION['flash']);
-            $type = htmlspecialchars($flash['type']);
-            $message = htmlspecialchars($flash['message']);
-            echo "<div class=\"flash flash-$type\">$message</div>";
+    if (!empty($_SESSION['flash'])) {
+        $flash = $_SESSION['flash'];
+        unset($_SESSION['flash']);
+
+        $type    = htmlspecialchars((string)($flash['type'] ?? 'success'), ENT_QUOTES, 'UTF-8');
+        $message = htmlspecialchars((string)($flash['message'] ?? ''),       ENT_QUOTES, 'UTF-8');
+
+        echo '<div class="flash flash-', $type, '">', $message, '</div>';
+    }
+}
+
+    /* ===== Auth & Session (CORE-first) ===== */
+
+    /**
+     * Log the user in by CORE user id.
+     * Stores only the id in session to keep data source of truth in CORE DB.
+     */
+    function auth_login(int $userId): void {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            session_name(SESSION_NAME);
+            session_start();
         }
+        // Use a dedicated key; keep old 'user' for backward compat but clear it to avoid stale records
+        $_SESSION['uid'] = (int)$userId;
+        unset($_SESSION['user']); // clear legacy session payload if present
     }
 
-    function current_user(): ?array { return $_SESSION['user'] ?? null; }
+    /** Destroy session completely. */
+    function auth_logout(): void {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            session_name(SESSION_NAME);
+            session_start();
+        }
+        $_SESSION = [];
+        if (ini_get("session.use_cookies")) {
+            $params = session_get_cookie_params();
+            setcookie(session_name(), '', time()-42000, $params["path"], $params["domain"], $params["secure"], $params["httponly"]);
+        }
+        session_destroy();
+    }
+
+    /**
+     * Fetch current user: primary from CORE via uid; fallback from legacy $_SESSION['user'].
+     * If legacy payload contains an email that exists in CORE, we auto-upgrade to uid.
+     */
+    function current_user(): ?array {
+        // Preferred path: uid -> core users table
+        if (!empty($_SESSION['uid'])) {
+            $core = core_user_record((int)$_SESSION['uid']);
+            if ($core) return $core;
+        }
+
+        // Back-compat path (older code may set $_SESSION['user'])
+        if (!empty($_SESSION['user']) && is_array($_SESSION['user'])) {
+            $legacy = $_SESSION['user'];
+            // Try to resolve to CORE by email
+            if (!empty($legacy['email'])) {
+                $u = core_find_user_by_email((string)$legacy['email']);
+                if ($u) {
+                    // upgrade session to uid for all subsequent requests
+                    $_SESSION['uid'] = (int)$u['id'];
+                    unset($_SESSION['user']);
+                    return $u;
+                }
+            }
+            // Last resort: return legacy payload (may not include permissions)
+            return $legacy;
+        }
+
+        return null;
+    }
+
+    /**
+     * Require a logged-in user; also logs a "login" activity once per session.
+     * Enforces suspension immediately.
+     */
     function require_login(): void {
-        if (!current_user()) {
+        $user = current_user();
+        if (!$user) {
             header('Location: login.php');
             exit;
         }
-        $user = current_user();
         $userId = $user['id'] ?? null;
         $sessionMarker = session_id();
         if (!isset($_SESSION['login_logged_marker']) || $_SESSION['login_logged_marker'] !== $sessionMarker) {
@@ -89,8 +158,11 @@ if (!defined('HELPERS_BOOTSTRAPPED')) {
         }
         enforce_not_suspended();
     }
+
     function is_post(): bool { return ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST'; }
     function sanitize(string $v): string { return htmlspecialchars($v, ENT_QUOTES|ENT_SUBSTITUTE, 'UTF-8'); }
+
+    /* ===== Domain constants ===== */
 
     function get_priorities(): array { return ['', 'low','low/mid','mid','mid/high','high']; }
     function get_statuses(): array { return ['open','in_progress','done']; }
@@ -100,7 +172,14 @@ if (!defined('HELPERS_BOOTSTRAPPED')) {
         return $map[$p] ?? $p;
     }
     function priority_class(string $p): string {
-        return match ($p) { 'low'=>'priority-low','low/mid'=>'priority-lowmid','mid'=>'priority-mid','mid/high'=>'priority-midhigh','high'=>'priority-high', default=>'priority-none' };
+        return match ($p) {
+            'low' => 'priority-low',
+            'low/mid' => 'priority-lowmid',
+            'mid' => 'priority-mid',
+            'mid/high' => 'priority-midhigh',
+            'high' => 'priority-high',
+            default => 'priority-none'
+        };
     }
     function status_label(string $s): string {
         return match ($s) { 'open'=>'Open','in_progress'=>'In Progress','done'=>'Done', default=>ucfirst($s) };
@@ -108,6 +187,8 @@ if (!defined('HELPERS_BOOTSTRAPPED')) {
     function status_class(string $s): string {
         return match ($s) { 'open'=>'status-open','in_progress'=>'status-inprogress','done'=>'status-done', default=>'status-open' };
     }
+
+    /* ===== App (punchlist) queries — use APPS DB ===== */
 
     function fetch_buildings(): array {
         $stmt = get_pdo()->query('SELECT id,name FROM buildings ORDER BY name');
@@ -129,6 +210,8 @@ if (!defined('HELPERS_BOOTSTRAPPED')) {
         return $indexed;
     }
 
+    /* ===== S3 helpers ===== */
+
     function s3_client(): Aws\S3\S3Client {
         static $client;
         if ($client === null) {
@@ -142,20 +225,21 @@ if (!defined('HELPERS_BOOTSTRAPPED')) {
         }
         return $client;
     }
-    function s3_signed_url_for_key(string $key, int $ttlSeconds = 900): string {
-    $client = s3_client();
-    $cmd = $client->getCommand('GetObject', ['Bucket' => S3_BUCKET, 'Key' => $key]);
-    $req = $client->createPresignedRequest($cmd, '+' . $ttlSeconds . ' seconds');
-    return (string) $req->getUri();
-}
 
-/** Produce a browser-usable URL for a photo row */
-function photo_public_url(array|string $photoOrKey, ?int $maxWidth = null): string {
-    $key = is_array($photoOrKey) ? ($photoOrKey['s3_key'] ?? '') : $photoOrKey;
-    if ($key === '') return '#';
-    // (maxWidth reserved for future; not used by file.php now)
-    return '/download.php?key=' . rawurlencode($key);
-}
+    function s3_signed_url_for_key(string $key, int $ttlSeconds = 900): string {
+        $client = s3_client();
+        $cmd = $client->getCommand('GetObject', ['Bucket' => S3_BUCKET, 'Key' => $key]);
+        $req = $client->createPresignedRequest($cmd, '+' . $ttlSeconds . ' seconds');
+        return (string) $req->getUri();
+    }
+
+    /** Produce a browser-usable URL for a photo row */
+    function photo_public_url(array|string $photoOrKey, ?int $maxWidth = null): string {
+        $key = is_array($photoOrKey) ? ($photoOrKey['s3_key'] ?? '') : $photoOrKey;
+        if ($key === '') return '#';
+        // (maxWidth reserved for future; not used by file.php now)
+        return '/download.php?key=' . rawurlencode($key);
+    }
 
     function s3_object_url(string $key): string {
         if (S3_URL_BASE !== '') return rtrim(S3_URL_BASE,'/').'/'.ltrim($key,'/');
@@ -169,28 +253,78 @@ function photo_public_url(array|string $photoOrKey, ?int $maxWidth = null): stri
         return rtrim($host.$path,'/').'/'.ltrim($key,'/');
     }
 
+    /* ===== Tasks (APPS DB) ===== */
+
     function build_task_filter_query(array $filters, array &$params): string {
-        $conditions = [];
-        if (!empty($filters['search'])) { $conditions[]='(t.title LIKE :search OR t.description LIKE :search)'; $params[':search']='%'.$filters['search'].'%'; }
-        if (!empty($filters['building_id'])) { $conditions[]='t.building_id=:building_id'; $params[':building_id']=(int)$filters['building_id']; }
-        if (!empty($filters['room_id'])) { $conditions[]='t.room_id=:room_id'; $params[':room_id']=(int)$filters['room_id']; }
-        if (!empty($filters['priority']) && is_array($filters['priority'])) {
-            $ph=[]; foreach ($filters['priority'] as $i=>$p){ $k=":priority$i"; $ph[]=$k; $params[$k]=$p; }
-            if ($ph) $conditions[]='t.priority IN ('.implode(',',$ph).')';
-        }
-        if (!empty($filters['status'])) { $conditions[]='t.status=:status'; $params[':status']=$filters['status']; }
-        if (!empty($filters['assigned_to'])) { $conditions[]='t.assigned_to LIKE :assigned_to'; $params[':assigned_to']='%'.$filters['assigned_to'].'%'; }
-        if (!empty($filters['created_from'])) { $conditions[]='DATE(t.created_at)>=:created_from'; $params[':created_from']=$filters['created_from']; }
-        if (!empty($filters['created_to'])) { $conditions[]='DATE(t.created_at)<=:created_to'; $params[':created_to']=$filters['created_to']; }
-        if (!empty($filters['due_from'])) { $conditions[]='t.due_date>=:due_from'; $params[':due_from']=$filters['due_from']; }
-        if (!empty($filters['due_to'])) { $conditions[]='t.due_date<=:due_to'; $params[':due_to']=$filters['due_to']; }
-        if (isset($filters['has_photos']) && $filters['has_photos']!=='') {
-            $conditions[] = ($filters['has_photos']==='1')
-                ? 'EXISTS (SELECT 1 FROM task_photos tp WHERE tp.task_id=t.id)'
-                : 'NOT EXISTS (SELECT 1 FROM task_photos tp WHERE tp.task_id=t.id)';
-        }
-        return $conditions ? 'WHERE '.implode(' AND ',$conditions) : '';
+    $conditions = [];
+
+    // 🔎 Search (title or description). COALESCE fixes NULL description rows.
+    if (isset($filters['search']) && $filters['search'] !== '') {
+    $conditions[] = "(CONCAT_WS(' ', t.title, t.description) LIKE :search)";
+    $params[':search'] = '%' . $filters['search'] . '%';
+}
+
+    if (!empty($filters['building_id'])) {
+        $conditions[] = 't.building_id = :building_id';
+        $params[':building_id'] = (int)$filters['building_id'];
     }
+
+    if (!empty($filters['room_id'])) {
+        $conditions[] = 't.room_id = :room_id';
+        $params[':room_id'] = (int)$filters['room_id'];
+    }
+
+    if (!empty($filters['priority']) && is_array($filters['priority'])) {
+        $ph = [];
+        foreach ($filters['priority'] as $i => $p) {
+            $k = ":priority$i";
+            $ph[] = $k;
+            $params[$k] = $p;
+        }
+        if ($ph) {
+            $conditions[] = 't.priority IN (' . implode(',', $ph) . ')';
+        }
+    }
+
+    if (!empty($filters['status'])) {
+        $conditions[] = 't.status = :status';
+        $params[':status'] = $filters['status'];
+    }
+
+    if (!empty($filters['assigned_to'])) {
+        $conditions[] = 't.assigned_to LIKE :assigned_to';
+        $params[':assigned_to'] = '%' . $filters['assigned_to'] . '%';
+    }
+
+    if (!empty($filters['created_from'])) {
+        $conditions[] = 'DATE(t.created_at) >= :created_from';
+        $params[':created_from'] = $filters['created_from'];
+    }
+
+    if (!empty($filters['created_to'])) {
+        $conditions[] = 'DATE(t.created_at) <= :created_to';
+        $params[':created_to'] = $filters['created_to'];
+    }
+
+    if (!empty($filters['due_from'])) {
+        $conditions[] = 't.due_date >= :due_from';
+        $params[':due_from'] = $filters['due_from'];
+    }
+
+    if (!empty($filters['due_to'])) {
+        $conditions[] = 't.due_date <= :due_to';
+        $params[':due_to'] = $filters['due_to'];
+    }
+
+    if (isset($filters['has_photos']) && $filters['has_photos'] !== '') {
+        $conditions[] = ($filters['has_photos'] === '1')
+            ? 'EXISTS (SELECT 1 FROM task_photos tp WHERE tp.task_id = t.id)'
+            : 'NOT EXISTS (SELECT 1 FROM task_photos tp WHERE tp.task_id = t.id)';
+    }
+
+    return $conditions ? 'WHERE ' . implode(' AND ', $conditions) : '';
+}
+
 
     function fetch_tasks(array $filters, string $sort, string $direction, int $limit, int $offset, int &$total): array {
         $params = [];
@@ -301,20 +435,21 @@ function photo_public_url(array|string $photoOrKey, ?int $maxWidth = null): stri
     }
 
     function get_filter_values(): array {
-        return [
-            'search' => trim($_GET['search'] ?? ''),
-            'building_id' => ($_GET['building_id'] ?? '') !== '' ? (int)$_GET['building_id'] : null,
-            'room_id' => ($_GET['room_id'] ?? '') !== '' ? (int)$_GET['room_id'] : null,
-            'priority' => isset($_GET['priority']) ? array_filter((array)$_GET['priority'], fn($p)=>$p!=='') : [],
-            'status' => $_GET['status'] ?? '',
-            'assigned_to' => trim($_GET['assigned_to'] ?? ''),
-            'created_from' => $_GET['created_from'] ?? '',
-            'created_to' => $_GET['created_to'] ?? '',
-            'due_from' => $_GET['due_from'] ?? '',
-            'due_to' => $_GET['due_to'] ?? '',
-            'has_photos' => $_GET['has_photos'] ?? '',
-        ];
-    }
+    $rawSearch = $_GET['search'] ?? ($_GET['q'] ?? '');
+    return [
+        'search'       => trim((string)$rawSearch),
+        'building_id'  => ($_GET['building_id'] ?? '') !== '' ? (int)$_GET['building_id'] : null,
+        'room_id'      => ($_GET['room_id'] ?? '') !== '' ? (int)$_GET['room_id'] : null,
+        'priority'     => isset($_GET['priority']) ? array_filter((array)$_GET['priority'], fn($p)=>$p!=='') : [],
+        'status'       => $_GET['status'] ?? '',
+        'assigned_to'  => trim((string)($_GET['assigned_to'] ?? '')),
+        'created_from' => $_GET['created_from'] ?? '',
+        'created_to'   => $_GET['created_to'] ?? '',
+        'due_from'     => $_GET['due_from'] ?? '',
+        'due_to'       => $_GET['due_to'] ?? '',
+        'has_photos'   => $_GET['has_photos'] ?? '',
+    ];
+}
 
     function filter_summary(array $f): string {
         $parts = [];
@@ -371,8 +506,8 @@ function photo_public_url(array|string $photoOrKey, ?int $maxWidth = null): stri
 
     function analytics_counts(): array {
         $pdo = get_pdo();
-        $open = $pdo->query("SELECT COUNT(*) FROM tasks WHERE status='open'")->fetchColumn();
-        $done30 = $pdo->query("SELECT COUNT(*) FROM tasks WHERE status='done' AND updated_at >= (CURDATE() - INTERVAL 30 DAY)")->fetchColumn();
+        $open    = $pdo->query("SELECT COUNT(*) FROM tasks WHERE status='open'")->fetchColumn();
+        $done30  = $pdo->query("SELECT COUNT(*) FROM tasks WHERE status='done' AND updated_at >= (CURDATE() - INTERVAL 30 DAY)")->fetchColumn();
         $dueWeek = $pdo->query("SELECT COUNT(*) FROM tasks WHERE status <> 'done' AND due_date BETWEEN CURDATE() AND (CURDATE() + INTERVAL 7 DAY)")->fetchColumn();
         $overdue = $pdo->query("SELECT COUNT(*) FROM tasks WHERE status <> 'done' AND due_date IS NOT NULL AND due_date < CURDATE()")->fetchColumn();
         return ['open'=>(int)$open,'done30'=>(int)$done30,'dueWeek'=>(int)$dueWeek,'overdue'=>(int)$overdue];
@@ -427,14 +562,13 @@ function photo_public_url(array|string $photoOrKey, ?int $maxWidth = null): stri
     }
 
     function task_photo_thumbnails(int $taskId): array {
-    $photos = fetch_task_photos($taskId);  // indexed by position already
-    $out = [];
-    for ($i = 1; $i <= 3; $i++) {
-        $out[$i] = !empty($photos[$i]) ? photo_public_url($photos[$i], 900) : null;
+        $photos = fetch_task_photos($taskId);  // indexed by position already
+        $out = [];
+        for ($i = 1; $i <= 3; $i++) {
+            $out[$i] = !empty($photos[$i]) ? photo_public_url($photos[$i], 900) : null;
+        }
+        return $out;
     }
-    return $out;
-}
-
 
     function fetch_photos_for_tasks(array $ids): array {
         if (empty($ids)) return [];
@@ -452,6 +586,41 @@ function photo_public_url(array|string $photoOrKey, ?int $maxWidth = null): stri
         echo json_encode($data);
         exit;
     }
+
+    /* =====================
+       CORE user helpers
+       ===================== */
+
+    /**
+     * Primary lookup: find a CORE user by email.
+     * Returns role/sector slugs if available.
+     */
+    function core_find_user_by_email(string $email): ?array {
+        try {
+            $pdo = get_pdo('core');
+            $sql = "SELECT u.*,
+                           r.key_slug  AS role_slug,  r.label AS role_label,
+                           s.key_slug  AS sector_slug, s.name AS sector_name
+                    FROM users u
+                    JOIN roles r   ON r.id = u.role_id
+                    LEFT JOIN sectors s ON s.id = u.sector_id
+                    WHERE u.email = ?
+                    LIMIT 1";
+            $st = $pdo->prepare($sql);
+            $st->execute([$email]);
+            $u = $st->fetch();
+            return $u ?: null;
+        } catch (Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Cached lookup by CORE id (used by current_user()).
+     * (Implementation in CODEGEN block below uses get_pdo('core').)
+     */
+
+    /* ===== Permission & activity (CODEGEN EXTENSIONS) ===== */
 
     /* CODEGEN EXTENSIONS START */
     function core_user_record(int $userId): ?array {
@@ -510,7 +679,7 @@ function photo_public_url(array|string $photoOrKey, ?int $maxWidth = null): stri
         }
         $map = [
             'viewer' => ['view', 'download'],
-            'admin' => ['view', 'download', 'edit', 'inventory_manage'],
+            'admin'  => ['view', 'download', 'edit', 'inventory_manage'],
         ];
         return in_array($perm, $map[$role] ?? [], true);
     }
@@ -530,12 +699,27 @@ function photo_public_url(array|string $photoOrKey, ?int $maxWidth = null): stri
         }
         $record = core_user_record((int)$user['id']);
         if ($record && !empty($record['suspended_at'])) {
-            unset($_SESSION['user']);
+            // hard logout
+            unset($_SESSION['uid'], $_SESSION['user']);
             $_SESSION['flash'] = ['message' => 'Account suspended.', 'type' => 'error'];
             header('Location: login.php');
             exit;
         }
     }
+    /* ===================== NOTES SHARING HELPERS ===================== */
+
+
+/** Fetch {id,email} options from CORE DB for a <select> list. */
+function core_user_options(): array {
+    try {
+        $core = get_pdo('core');
+        $st = $core->query("SELECT id, email FROM users WHERE suspended_at IS NULL ORDER BY email");
+        return $st->fetchAll();
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
 
     function log_event(string $action, ?string $type = null, ?int $id = null, array $meta = []): void {
         try {

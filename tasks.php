@@ -8,11 +8,10 @@ if (!can('view')) {
 
 $filters   = get_filter_values();
 $page      = max(1, (int)($_GET['page'] ?? 1));
-$perPage   = 20;
+$perPage   = 30;
 $sort      = $_GET['sort'] ?? 'id';       // changed default from created_at → id
 $direction = $_GET['direction'] ?? 'DESC';
 $total     = 0;
-
 $tasks  = fetch_tasks($filters, $sort, $direction, $perPage, ($page - 1) * $perPage, $total);
 $taskIds = array_column($tasks, 'id');
 $photos  = fetch_photos_for_tasks($taskIds);
