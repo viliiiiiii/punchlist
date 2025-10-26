@@ -35,6 +35,7 @@ $sharesCol     = $sharesHasUser ? 'user_id' : ($sharesHasOld ? 'shared_with' : n
 $hasNoteDate   = notes__col_exists($pdo, 'notes', 'note_date');
 $hasCreatedAt  = notes__col_exists($pdo, 'notes', 'created_at');
 $hasPhotosTbl  = notes__table_exists($pdo, 'note_photos');
+$hasCommentsTbl= notes__table_exists($pdo, 'note_comments');
 
 /* ---------- Filters ---------- */
 $search = trim((string)($_GET['q'] ?? ''));
@@ -75,6 +76,9 @@ $whereSql = $where ? ('WHERE '.implode(' AND ', $where)) : '';
 $photoCountExpr = $hasPhotosTbl
   ? "(SELECT COUNT(*) FROM note_photos p WHERE p.note_id = n.id) AS photo_count"
   : "0 AS photo_count";
+$commentCountExpr = $hasCommentsTbl
+  ? "(SELECT COUNT(*) FROM note_comments c WHERE c.note_id = n.id) AS comment_count"
+  : "0 AS comment_count";
 
 /* ---------- Ordering ---------- */
 $orderParts = [];
@@ -88,7 +92,8 @@ $sql = "SELECT
           n.*,
           (n.user_id = :me1) AS is_owner,
           {$isSharedExpr},
-          {$photoCountExpr}
+          {$photoCountExpr},
+          {$commentCountExpr}
         FROM notes n
         {$whereSql}
         {$orderSql}";
@@ -136,7 +141,7 @@ include __DIR__ . '/../includes/header.php';
   <?php else: ?>
     <table class="table">
       <thead>
-        <tr><th>Date</th><th>Title</th><th>Photos</th><th class="text-right">Actions</th></tr>
+        <tr><th>Date</th><th>Title</th><th>Photos</th><th>Replies</th><th class="text-right">Actions</th></tr>
       </thead>
       <tbody>
       <?php foreach ($rows as $n): ?>
@@ -155,6 +160,7 @@ include __DIR__ . '/../includes/header.php';
             <?php endif; ?>
           </td>
           <td data-label="Photos"><?= (int)($n['photo_count'] ?? 0); ?></td>
+          <td data-label="Replies"><?= (int)($n['comment_count'] ?? 0); ?></td>
           <td class="text-right">
             <a class="btn small" href="view.php?id=<?= (int)$n['id']; ?>">View</a>
             <?php if (notes_can_edit($n)): ?>

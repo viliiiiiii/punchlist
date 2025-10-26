@@ -48,6 +48,44 @@ function notes__shares_column(PDO $pdo): ?string {
     return null;
 }
 
+function notes__ensure_shares_schema(PDO $pdo): ?string {
+    $col = notes__shares_column($pdo);
+    if ($col) {
+        return $col;
+    }
+
+    try {
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS notes_shares (
+                id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                note_id BIGINT UNSIGNED NOT NULL,
+                user_id BIGINT UNSIGNED NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uniq_note_user (note_id, user_id),
+                INDEX idx_user (user_id),
+                CONSTRAINT fk_notes_shares_note FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        );
+    } catch (Throwable $e) {
+        return null;
+    }
+
+    $col = notes__shares_column($pdo);
+    if ($col) {
+        return $col;
+    }
+
+    // Table exists but without expected columns: try adding a `user_id` column.
+    try {
+        $pdo->exec('ALTER TABLE notes_shares ADD COLUMN user_id BIGINT UNSIGNED NULL');
+        $pdo->exec('CREATE INDEX idx_user ON notes_shares (user_id)');
+    } catch (Throwable $e) {
+        // ignore; best effort
+    }
+
+    return notes__shares_column($pdo);
+}
+
 /* ---------- MIME/extension helpers ---------- */
 function notes_ext_for_mime(string $mime): ?string {
     return NOTES_ALLOWED_MIMES[$mime] ?? null;
@@ -114,8 +152,15 @@ function notes_delete(int $id): void {
         try { s3_client()->deleteObject(['Bucket'=>S3_BUCKET,'Key'=>$p['s3_key']]); } catch (Throwable $e) {}
     }
     $pdo = get_pdo();
-    $pdo->prepare("DELETE FROM note_photos WHERE note_id=?")->execute([$id]);
-    $pdo->prepare("DELETE FROM notes_shares WHERE note_id=?")->execute([$id]);
+    if (notes__table_exists($pdo, 'note_photos')) {
+        $pdo->prepare("DELETE FROM note_photos WHERE note_id=?")->execute([$id]);
+    }
+    if (notes__table_exists($pdo, 'note_comments')) {
+        $pdo->prepare("DELETE FROM note_comments WHERE note_id=?")->execute([$id]);
+    }
+    if (notes__table_exists($pdo, 'notes_shares')) {
+        $pdo->prepare("DELETE FROM notes_shares WHERE note_id=?")->execute([$id]);
+    }
     $pdo->prepare("DELETE FROM notes WHERE id=?")->execute([$id]);
 }
 
@@ -256,22 +301,105 @@ function notes_update_shares(int $noteId, array $userIds): void {
     $pdo = get_pdo();
     $col = notes__shares_column($pdo);
     if (!$col) {
+        $col = notes__ensure_shares_schema($pdo);
+    }
+    if (!$col) {
         throw new RuntimeException('notes_shares table/column not present.');
     }
-    $userIds = array_values(array_unique(array_filter(array_map('intval', $userIds))));
+
+    if ($col === 'user_id') {
+        $userIds = array_values(array_unique(array_filter(array_map('intval', $userIds))));
+    } else {
+        $userIds = array_values(array_unique(array_filter(array_map('strval', $userIds), fn($v) => $v !== '')));
+    }
     $pdo->beginTransaction();
     try {
         $pdo->prepare('DELETE FROM notes_shares WHERE note_id = ?')->execute([$noteId]);
         if ($userIds) {
             $sql = "INSERT INTO notes_shares (note_id, $col) VALUES (?, ?)";
             $ins = $pdo->prepare($sql);
-            foreach ($userIds as $uid) $ins->execute([$noteId, $uid]);
+            foreach ($userIds as $uid) {
+                $ins->execute([$noteId, $uid]);
+            }
         }
         $pdo->commit();
     } catch (Throwable $e) {
         $pdo->rollBack();
         throw $e;
     }
+}
+
+function notes_fetch_users_from(PDO $pdo, array $ids): array {
+    if (!$ids) return [];
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    try {
+        $st = $pdo->prepare("SELECT id, email FROM users WHERE id IN ($placeholders)");
+        $st->execute($ids);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (Throwable $e) {
+        return [];
+    }
+    $map = [];
+    foreach ($rows as $row) {
+        $uid = (int)($row['id'] ?? 0);
+        if ($uid <= 0) continue;
+        $label = trim((string)($row['email'] ?? ''));
+        $map[$uid] = $label !== '' ? $label : ('User #'.$uid);
+    }
+    return $map;
+}
+
+function notes_fetch_users_map(array $ids): array {
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+    if (!$ids) return [];
+
+    $map = [];
+    $remaining = $ids;
+
+    try {
+        $core = get_pdo('core');
+        $coreMap = notes_fetch_users_from($core, $remaining);
+        $map = $coreMap;
+        if ($coreMap) {
+            $remaining = array_values(array_diff($remaining, array_keys($coreMap)));
+        }
+    } catch (Throwable $e) {
+        // ignore; fall back to apps DB
+    }
+
+    if ($remaining) {
+        try {
+            $appsMap = notes_fetch_users_from(get_pdo(), $remaining);
+            $map = $map + $appsMap;
+            if ($appsMap) {
+                $remaining = array_values(array_diff($remaining, array_keys($appsMap)));
+            }
+        } catch (Throwable $e) {
+            // ignore
+        }
+    }
+
+    if ($remaining) {
+        foreach ($remaining as $id) {
+            $map[$id] = 'User #'.$id;
+        }
+    }
+
+    return $map;
+}
+
+function notes_get_share_details(int $noteId): array {
+    $ids = notes_get_share_user_ids($noteId);
+    if (!$ids) return [];
+    $labels = notes_fetch_users_map($ids);
+    $out = [];
+    foreach ($ids as $id) {
+        $out[] = [
+            'id'    => $id,
+            'label' => $labels[$id] ?? ('User #'.$id),
+        ];
+    }
+    return $out;
 }
 
 function notes_can_view(array $note): bool {
@@ -288,8 +416,13 @@ function notes_can_view(array $note): bool {
     if (!isset($note['id'])) return false;
     try {
         $pdo = get_pdo();
-        $st = $pdo->prepare('SELECT 1 FROM notes_shares WHERE note_id = ? AND user_id = ? LIMIT 1');
-        $st->execute([(int)$note['id'], $meId]);
+        $col = notes__shares_column($pdo);
+        if (!$col) {
+            return false;
+        }
+        $value = $col === 'user_id' ? $meId : (string)$meId;
+        $st = $pdo->prepare("SELECT 1 FROM notes_shares WHERE note_id = ? AND $col = ? LIMIT 1");
+        $st->execute([(int)$note['id'], $value]);
         return (bool)$st->fetchColumn();
     } catch (Throwable $e) {
         return false;
@@ -310,5 +443,121 @@ function notes_can_share(array $note): bool {
     if (in_array($role, ['root','admin'], true)) return true;
     $meId = (int)(current_user()['id'] ?? 0);
     return (int)($note['user_id'] ?? 0) === $meId;
+}
+
+/* ---------- comments ---------- */
+
+function notes_comments_table_exists(?PDO $pdo = null): bool {
+    $pdo = $pdo ?: get_pdo();
+    return notes__table_exists($pdo, 'note_comments');
+}
+
+function notes_comment_fetch(int $commentId): ?array {
+    $pdo = get_pdo();
+    if (!notes_comments_table_exists($pdo)) return null;
+    $st = $pdo->prepare('SELECT * FROM note_comments WHERE id = ?');
+    $st->execute([$commentId]);
+    $row = $st->fetch();
+    return $row ?: null;
+}
+
+function notes_comment_insert(int $noteId, int $userId, string $body, ?int $parentId = null): int {
+    $pdo = get_pdo();
+    if (!notes_comments_table_exists($pdo)) {
+        throw new RuntimeException('Comments table not available.');
+    }
+
+    $parentId = $parentId ? (int)$parentId : null;
+    if ($parentId) {
+        $parent = notes_comment_fetch($parentId);
+        if (!$parent || (int)$parent['note_id'] !== $noteId) {
+            throw new RuntimeException('Invalid parent comment.');
+        }
+    }
+
+    $st = $pdo->prepare(
+        'INSERT INTO note_comments (note_id, user_id, parent_id, body)
+         VALUES (:note_id, :user_id, :parent_id, :body)'
+    );
+    $st->execute([
+        ':note_id'  => $noteId,
+        ':user_id'  => $userId,
+        ':parent_id'=> $parentId,
+        ':body'     => $body,
+    ]);
+
+    return (int)$pdo->lastInsertId();
+}
+
+function notes_comment_delete(int $commentId): void {
+    $pdo = get_pdo();
+    if (!notes_comments_table_exists($pdo)) return;
+    $st = $pdo->prepare('DELETE FROM note_comments WHERE id = ?');
+    $st->execute([$commentId]);
+}
+
+function notes_comment_can_delete(array $comment, array $note): bool {
+    $role = current_user_role_key();
+    if (in_array($role, ['root','admin'], true)) return true;
+    $meId = (int)(current_user()['id'] ?? 0);
+    if ($meId <= 0) return false;
+    if ((int)$comment['user_id'] === $meId) return true;
+    return (int)($note['user_id'] ?? 0) === $meId;
+}
+
+function notes_fetch_comments(int $noteId): array {
+    $pdo = get_pdo();
+    if (!notes_comments_table_exists($pdo)) return [];
+
+    $st = $pdo->prepare('SELECT * FROM note_comments WHERE note_id = ? ORDER BY created_at ASC, id ASC');
+    $st->execute([$noteId]);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    if (!$rows) return [];
+
+    $userIds = [];
+    foreach ($rows as $row) {
+        $userIds[] = (int)($row['user_id'] ?? 0);
+    }
+    $userMap = notes_fetch_users_map($userIds);
+
+    foreach ($rows as &$row) {
+        $uid = (int)($row['user_id'] ?? 0);
+        $row['author_label'] = $userMap[$uid] ?? ('User #'.$uid);
+    }
+    unset($row);
+
+    return $rows;
+}
+
+function notes_fetch_comment_threads(int $noteId): array {
+    $rows = notes_fetch_comments($noteId);
+    if (!$rows) return [];
+
+    $byId = [];
+    foreach ($rows as $row) {
+        $row['children'] = [];
+        $byId[(int)$row['id']] = $row;
+    }
+
+    $tree = [];
+    foreach ($byId as $id => &$row) {
+        $parentId = (int)($row['parent_id'] ?? 0);
+        if ($parentId && isset($byId[$parentId])) {
+            $byId[$parentId]['children'][] = &$row;
+        } else {
+            $tree[] = &$row;
+        }
+    }
+    unset($row);
+
+    return $tree;
+}
+
+function notes_comment_count(int $noteId): int {
+    $pdo = get_pdo();
+    if (!notes_comments_table_exists($pdo)) return 0;
+    $st = $pdo->prepare('SELECT COUNT(*) FROM note_comments WHERE note_id = ?');
+    $st->execute([$noteId]);
+    return (int)$st->fetchColumn();
 }
 

@@ -250,6 +250,25 @@ textarea:focus {
     font-size: 0.8rem;
 }
 
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    background: #e2e8f0;
+    color: #475569;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.badge-muted {
+    background: #f1f5f9;
+    color: #475569;
+}
+
 .table {
     width: 100%;
     border-collapse: collapse;
@@ -327,6 +346,74 @@ details[open] summary {
 
 .small {
     font-size: 0.8rem;
+}
+
+.note-comments {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.note-comment {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 0.85rem 1rem;
+    background: #fff;
+}
+
+.note-comment-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.5rem;
+}
+
+.note-comment-body {
+    margin-bottom: 0.75rem;
+    white-space: pre-wrap;
+}
+
+.note-comment-actions {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.note-comment-actions form.inline {
+    display: inline-flex;
+}
+
+.note-comment-children {
+    margin-top: 0.75rem;
+    margin-left: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.note-comment-reply summary {
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--color-primary);
+}
+
+.note-comment-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-top: 0.5rem;
+}
+
+.note-comment-form textarea {
+    width: 100%;
+    resize: vertical;
+}
+
+.note-comment-new {
+    border-top: 1px solid var(--color-border);
+    padding-top: 1rem;
 }
 
 .status {
